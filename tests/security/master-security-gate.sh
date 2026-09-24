@@ -137,7 +137,21 @@ add_check() { # add_check <id> <name> <doc> <requires> <command> <evidence>...
 # registry is the cheapest way to make a security gate green, and it is the
 # one that leaves no failing output behind. See the registry-integrity guard
 # in the run loop.
-MIN_CHECKS=17
+#
+# A FLOOR, not an equality, and deliberately so: `--selftest` registers decoy
+# rows through `--extra-checks`, so the count is allowed to exceed it and the
+# guard uses `-lt`. What that costs is that a row registered ABOVE the floor
+# can be deleted in silence — which is the one thing this guard exists to
+# prevent — so raising the registry raises the floor with it.
+#
+# 17 -> 18 (2026-09-24, T1224), for the `sast-go-surface` row registered
+# below it and nothing else: no row was removed, none gained a skip
+# condition, no evidence pattern was widened, `-lt` is unchanged, and every
+# row still has to print what it declared to be green. The row this bump
+# brings inside the floor is the surface criterion of the go row — the half
+# of it that a silent shrink would hide — so leaving it outside would have
+# made it the cheapest row in this file to delete.
+MIN_CHECKS=18
 
 # --- security surface -------------------------------------------------------
 
@@ -236,6 +250,34 @@ add_check sast-go \
   "bash tests/security/sast.sh go" \
   '^ok   sast-go: gosec v2\.29\.0: [0-9]+ file\(s\) scanned, [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)' \
   '^     severity mix: '
+
+# The go row's SURFACE, registered directly under it because the two read as
+# one sentence: this is the half that decides what `sast.sh go` was pointed
+# at. It was a complete instrument with no executor until now — nothing ran
+# tests/security/sast-go-surface-check.sh, so its cases, including the two
+# T1222 added for the `!` re-inclusion shapes, could not fail anywhere. A
+# check nobody runs is a check that cannot fail.
+#
+# What it plants, and what it therefore measures rather than reads out of
+# tests/security/sast.sh: an ignored copy under a dot directory, an ignored
+# package directory, an ignored FILE inside a package that stays, a
+# re-included file, a re-included package directory, and a Go file under
+# testdata/ — running the go row once per case and requiring the answer git
+# and the toolchain actually give, not the one the comment claims. Its last
+# case asserts the tree is as it was found, which is what keeps a plant from
+# becoming the next run's input. The row is here in ADDITION to sast-go and
+# not instead of it: sast-go judges the findings, this one judges the surface
+# they were taken from, and a green sast-go on a silently shrunken surface is
+# exactly the failure the instrument exists to catch.
+
+add_check sast-go-surface \
+  "SAST (Go) surface: what the go row scans, against planted copies, ignored files and re-included paths" \
+  "docs/23 §11 (SAST); tests/security/sast.sh (the go row's surface)" \
+  "go gosec git python3 file:tests/security/sast-go-surface-check.sh file:tests/security/sast.sh file:ops/ci/gosec-baseline.txt file:ops/security/tool-versions.sh" \
+  "bash tests/security/sast-go-surface-check.sh" \
+  '^sast-go-surface-check: OK — ten cases: the derived surface is green and prints itself, a copy' \
+  '^ok   case 7: green — the re-included file was not reported as an escape' \
+  '^ok   case 8: green, and the re-included package directory stayed in the surface'
 
 add_check sast-python \
   "SAST (Python adapter): bandit over the adapter's source, no skip list and no severity floor" \
@@ -388,6 +430,14 @@ prereq_missing() { # -> one reason per line, empty when everything resolves
       node)        have node        || echo "node is not on PATH";;
       pnpm)        have pnpm        || echo "pnpm is not on PATH (corepack enable pnpm)";;
       python3)     have python3     || echo "python3 is not on PATH";;
+      # The one tool below that is not a scanner: the go face's surface check
+      # tells this repository's own source from the local state beside it by
+      # asking git (tests/security/sast.sh repo_paths_only), and the instrument
+      # that measures that check refuses to run without git at all. Declared
+      # rather than left to its own `die`: a missing tool is a row this host
+      # cannot ask, and NOT ASKED with the tool named is what the gate's third
+      # rule says that reads as.
+      git)         have git         || echo "git is not on PATH — the go face's surface check tells this repository's source from the local state beside it by asking git (tests/security/sast.sh repo_paths_only), and sast-go-surface-check.sh refuses a tree that is not a git work tree";;
       psql)        have psql        || echo "psql is not on PATH (the owasp smoke gives itself its own database)";;
       curl)        have curl        || echo "curl is not on PATH";;
       uv)          have uv          || echo "uv is not on PATH (pip install uv)";;
