@@ -60,6 +60,35 @@
 #   6. the plants removed the row is green again, and the tree is left as it
 #                         was found
 #
+#   7. a file git RE-INCLUDES: `*.go` + `!keep.go` in a package directory that
+#                         stays in the surface. git does NOT ignore keep.go —
+#                         `git check-ignore -q` says so — and yet
+#                         `git check-ignore --stdin -v` prints a line for it
+#                         whose pattern field starts with `!`, and exits 0.
+#                         A reader that counts every printed line as a hit
+#                         refuses that file and the surface with it: a red row
+#                         on a tree that is fine (2026-09-24, T1222)
+#   8. a package DIRECTORY git RE-INCLUDES (`negpkg/` + `!negpkg/`): the same
+#                         reading one level up, in the direction that loses
+#                         coverage — counted as a hit, a package of this module
+#                         leaves the surface while the row prints a rule that
+#                         says the opposite of what git said. The case also
+#                         requires the finding of a file in that directory to
+#                         come back from the scanner, so "it is in the surface"
+#                         is measured and not inferred from a green row
+#   9. a Go file under `testdata/`: the toolchain's package PATTERN never names
+#                         such a directory, so the fixture is outside the
+#                         surface (see the note in tests/security/sast.sh) —
+#                         and the case proves the row reaches that package by
+#                         moving the same file one directory up and requiring
+#                         the finding back. The 17 tracked Go files under
+#                         testdata/ are the real case of this, and the verdict
+#                         is the row's, not this script's
+#  10. the plants of 7-9 removed: the row is green again and nothing is left in
+#                         the tree — each of those plants carries a .gitignore
+#                         of its own, and one left behind would be read as the
+#                         tree's state by every later run
+#
 # Cases 2-5 ask the instruments their own questions before they judge the row:
 # case 3 checks with `git check-ignore` that the planted copy really is
 # ignored AND with `go list` that it really is in the derived surface; case 4
@@ -67,9 +96,14 @@
 # and that the directory is in the derived surface. A case whose plant stopped
 # being ignored, or stopped being scanned, would otherwise pass by measuring
 # nothing — which is the failure this script exists to catch, one level down.
+# Cases 7-9 ask them the same way, and ask one more thing: that git really
+# prints the shape the case is about (`negation_line_for`) and that the plant's
+# file really is one the row feeds its surface check (`in_go_files`). A case
+# about a `!` line on a tree where git stopped printing one would pass without
+# ever exercising the reading it exists for.
 #
 # Runnable on a host with bash + go + gosec + git (`make security-tools`).
-# It runs the go row six times; see tests/security/sast.sh for the row itself.
+# It runs the go row ten times; see tests/security/sast.sh for the row itself.
 #
 # Exit codes
 #   0  every case behaved as above, and the tree was left as it was found
@@ -91,6 +125,13 @@ PLANT_PARENT="tests/security/node_modules"
 PLANT="$PLANT_PARENT/sast-go-surface-check"      # a package dir the derived surface returns
 DOT_PLANT="$PLANT_PARENT/.sast-go-surface-copy"  # the same file, under a dot directory
 FILE_PLANT="tests/security/sast-go-surface-check-file"  # a package dir with one ignored file
+# The three plants of cases 7-9: the shapes a NEGATED .gitignore pattern makes.
+# Each one is a package of this module that the derived surface returns, so the
+# row has to answer for it, and each one's own .gitignore is what makes it.
+NEG_FILE_PLANT="tests/security/sast-go-surface-check-neg"     # *.go + !keep.go, keep.go beside _drop.go
+NEG_DIR_PARENT="tests/security/sast-go-surface-check-negdir"  # negpkg/ + !negpkg/
+NEG_DIR_PLANT="$NEG_DIR_PARENT/negpkg"                        # the directory git re-includes
+TD_PLANT="tests/security/sast-go-surface-check-testdata"      # a package dir with a testdata/ of its own
 WORK="$(mktemp -d)"
 FAILS=0
 
@@ -100,7 +141,8 @@ ok()   { printf 'ok   %s\n' "$*"; }
 step() { printf '\n== %s ==\n' "$*"; }
 
 cleanup() {
-  rm -rf "$PLANT" "$DOT_PLANT" "$FILE_PLANT"
+  rm -rf "$PLANT" "$DOT_PLANT" "$FILE_PLANT" \
+         "$NEG_FILE_PLANT" "$NEG_DIR_PARENT" "$TD_PLANT"
   rmdir "$PLANT_PARENT" 2>/dev/null || true
   rm -rf "$WORK"
 }
@@ -132,6 +174,62 @@ plant_ignored_file() { # the dir is not ignored; the file inside it is
   probe_go "$1"
 }
 
+# A Go file that carries NO finding, in a package of its own name. Cases 7-9
+# plant these in package directories the row is expected to scan and stay
+# green on: a plant that carried a finding would red the row for a reason that
+# has nothing to do with what the case is asking.
+clean_go() { # clean_go <file> <package>
+  cat >"$1" <<GO
+// Planted by tests/security/sast-go-surface-check.sh. Removed again by that
+// script's exit trap.
+package $2
+
+func Keep() int { return 1 }
+GO
+}
+plant_negated_file() { # *.go + !keep.go, with an ignored _drop.go beside keep.go
+  mkdir -p "$1"
+  printf '*.go\n!keep.go\n' >"$1/.gitignore"
+  clean_go "$1/keep.go" negfileprobe
+  # The file the pattern really does exclude is named `_drop.go` on purpose:
+  # git ignores it (checked below), and Go's own rule — a file whose name
+  # begins with `_` is not a source file of the package — keeps it out of the
+  # file list the row feeds its surface check. A file that git ignores AND
+  # the toolchain returns would be refused by the row for the right reason
+  # (case 4), so it could not be the second half of THIS case: what case 7
+  # asks is whether a path git RE-INCLUDED is read as an escape, and a plant
+  # that is refused for a real exclusion measures the opposite.
+  clean_go "$1/_drop.go" negfileprobe
+}
+plant_negated_dir() { # a package directory that is excluded and then re-included
+  mkdir -p "$1"
+  printf 'negpkg/\n!negpkg/\n' >"$(dirname "$1")/.gitignore"
+  clean_go "$1/keep.go" negdirprobe
+}
+finding_go() { # finding_go <file> <package> — a Go file carrying one gosec finding
+  cat >"$1" <<GO
+// Planted by tests/security/sast-go-surface-check.sh. Removed again by that
+// script's exit trap.
+package $2
+
+import "os"
+
+func CopiedSource(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+GO
+}
+plant_testdata() { # a package dir the row scans, with a testdata/ dir it does not
+  # The two files are the SAME package and the same shape; the only difference
+  # between them is the directory one of them sits in. Case 9 moves the one
+  # under testdata/ up beside the other and requires the row to report it
+  # there — which is what makes "testdata is out of the surface" a measurement
+  # rather than a reading of the row's comment.
+  mkdir -p "$1/testdata"
+  clean_go "$1/probe.go" tdprobe
+  finding_go "$1/testdata/planted.go" tdprobe
+}
+
 ROW_RC=0 ROW_LOG=""
 run_row() { # run_row <name> [POST_SAST_GO_TARGET]
   local name="$1" target="${2:-}"
@@ -149,6 +247,27 @@ row_fails() { fail "$1"; show_row; }
 
 ignored() { git -C "$ROOT" check-ignore -q -- "$1"; }         # 0 when git ignores it
 in_surface() { go list -e -f '{{.Dir}}' ./... 2>/dev/null | grep -Fxq "$ROOT/$1"; }
+in_go_files() { # 0 when `go list` returns this file as a source of its package
+  # The row's own file set: the same expression tests/security/sast.sh feeds
+  # its surface check (`{{range .GoFiles}}`), so a case that needs its plant to
+  # REACH that check can say so instead of assuming it.
+  go list -e -f '{{range .GoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null | grep -Fxq "$ROOT/$1"
+}
+negation_line_for() { # 0 when git prints a RE-INCLUSION ('!') line for this path
+  # The shape the reader in tests/security/sast.sh has to survive, asked of git
+  # directly and not of the row: `git check-ignore --stdin -v` answers a path
+  # whose last matching rule is a negation with a line whose pattern field
+  # starts with `!` — while `git check-ignore -q` on that same path exits 1,
+  # because the path is NOT ignored. A case planted on a tree where git stopped
+  # printing that line would otherwise pass by measuring nothing.
+  local path="${1%/}" line out
+  out="$(printf '%s\n' "$path" | git -C "$ROOT" check-ignore --stdin -v 2>/dev/null)"
+  while IFS= read -r line; do
+    [ "${line##*$'\t'}" = "$path" ] || continue
+    case "${line%%$'\t'*}" in *':!'*) return 0;; esac
+  done <<<"$out"
+  return 1
+}
 reported_as_finding() { # 0 when the row printed a finding line for this path
   grep -qE "^  $1:[0-9]+:[0-9]+: [A-Z]" "$ROW_LOG"
 }
@@ -274,13 +393,158 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+step "7. a file git RE-INCLUDES is not an escape: '*.go' + '!keep.go'"
+# `git check-ignore -v` prints a line for a path whose last matching pattern is
+# a re-inclusion, and the command exits 0 — while `git check-ignore -q` on that
+# same path exits 1, because the path is NOT ignored. A reader that counts every
+# printed line as a hit refuses a file git never ignored, and refuses the whole
+# surface with it: a red row on a tree that is fine (2026-09-24, T1222).
+plant_negated_file "$NEG_FILE_PLANT"
+if ! in_surface "$NEG_FILE_PLANT"; then
+  fail "case 7: the plant's package directory $NEG_FILE_PLANT is not in the derived surface, so the row never asks git about its files"
+elif ! ignored "$NEG_FILE_PLANT/_drop.go"; then
+  fail "case 7: '*.go' no longer ignores $NEG_FILE_PLANT/_drop.go, so the re-inclusion is not being asked against a real exclusion"
+elif ignored "$NEG_FILE_PLANT/keep.go"; then
+  fail "case 7: git ignores $NEG_FILE_PLANT/keep.go too, so '!keep.go' re-included nothing and this case measures nothing"
+elif ! negation_line_for "$NEG_FILE_PLANT/keep.go"; then
+  fail "case 7: git prints no re-inclusion ('!') line for $NEG_FILE_PLANT/keep.go, so the reading this case exists for is not exercised at all"
+elif ! in_go_files "$NEG_FILE_PLANT/keep.go"; then
+  fail "case 7: $NEG_FILE_PLANT/keep.go is not in the file set the row feeds its surface check, so its answer cannot be observed"
+else
+  run_row negated-file
+  if [ "$ROW_RC" -ne 0 ]; then
+    row_fails "case 7: the row failed on a file git explicitly does NOT ignore — a re-included path ('!keep.go') read as an escape"
+  elif grep -qF "$NEG_FILE_PLANT/keep.go" "$ROW_LOG"; then
+    row_fails "case 7: the row named the re-included file $NEG_FILE_PLANT/keep.go among the paths of a failed surface"
+  elif grep -q 'SCAN SURFACE FAILED' "$ROW_LOG"; then
+    row_fails "case 7: the row failed its surface, while the only ignored file in the plant is one git ignores for real and Go does not call source"
+  else
+    ok "case 7: green — the re-included file was not reported as an escape"
+    ok "     (git ignores $NEG_FILE_PLANT/_drop.go; it does not ignore keep.go, and the row agrees)"
+    grep -E "^     target: this module|^ok   sast-go" "$ROW_LOG" | sed 's/^/     /'
+  fi
+fi
+# Removed here and not at the end, so that a case which fails still leaves the
+# tree fit to ask the next question: a plant left standing is read by every
+# later run of the row (under a reader that mistakes a `!` line for a hit, its
+# keep.go reds EVERY later case, and each one's failure would be about this
+# plant instead of its own subject). Case 10 is where the removal is checked.
+rm -rf "$NEG_FILE_PLANT"
+
+# ---------------------------------------------------------------------------
+step "8. a package directory git RE-INCLUDES stays in the surface: 'negpkg/' + '!negpkg/'"
+# The same reading, one level up, and the direction that costs coverage: a
+# package directory whose last matching rule is a re-inclusion is source of
+# this repository. Counted as a hit it leaves the surface — and the row prints
+# a rule that says the opposite of what git said — which is the shrinking
+# surface T1220 was about, arriving through the check T1220 added.
+plant_negated_dir "$NEG_DIR_PLANT"
+if ignored "$NEG_DIR_PLANT"; then
+  fail "case 8: git ignores $NEG_DIR_PLANT, so '!negpkg/' re-included nothing and this case measures nothing"
+elif ! in_surface "$NEG_DIR_PLANT"; then
+  fail "case 8: $NEG_DIR_PLANT is not in the derived surface, so the row never considers it"
+elif ! negation_line_for "$NEG_DIR_PLANT"; then
+  fail "case 8: git prints no re-inclusion ('!') line for $NEG_DIR_PLANT, so the reading this case exists for is not exercised at all"
+else
+  # First: the directory really is scanned. The plant carries a finding, so
+  # this run is red ON PURPOSE — a row that dropped the directory cannot report
+  # the finding, and that is the failure this half is looking for.
+  finding_go "$NEG_DIR_PLANT/probe.go" negdirprobe
+  run_row negated-dir-scanned
+  if grep -qF "$NEG_DIR_PLANT  — git-ignored by" "$ROW_LOG"; then
+    row_fails "case 8: the row dropped the re-included package directory from the surface, naming a '!' rule as the one that ignored it"
+  elif ! reported_as_finding "$NEG_DIR_PLANT/probe.go"; then
+    row_fails "case 8: the row did not report the finding planted in $NEG_DIR_PLANT/probe.go — the re-included package directory never reached the scanner"
+  else
+    ok "case 8: the re-included package directory was scanned (its planted finding came back)"
+    grep -E "^  $NEG_DIR_PLANT/probe.go" "$ROW_LOG" | sed 's/^/     /'
+  fi
+  # Then: with the finding gone, the row is green and the directory is not
+  # named as dropped — the surface it derived is the one it prints.
+  rm -f "$NEG_DIR_PLANT/probe.go"
+  run_row negated-dir
+  if [ "$ROW_RC" -ne 0 ]; then
+    row_fails "case 8: the row is not green with a package directory git re-included"
+  elif grep -qF "$NEG_DIR_PLANT  — git-ignored by" "$ROW_LOG"; then
+    row_fails "case 8: the row dropped the re-included package directory from the surface (printed as NOT scanned)"
+  else
+    ok "case 8: green, and the re-included package directory stayed in the surface"
+    grep -E "^     target: this module|^ok   sast-go" "$ROW_LOG" | sed 's/^/     /'
+  fi
+fi
+rm -rf "$NEG_DIR_PARENT"   # out of the way of case 9, for the reason case 7 gives
+
+# ---------------------------------------------------------------------------
+step "9. a Go file under testdata/ is outside the surface — and here is how you would know"
+# `go list ./...` is a package PATTERN, and Go's patterns never expand into a
+# directory named testdata (Go reserves the name for the go command's own
+# data). 17 Go files of this repository are tracked under testdata/ and none of
+# them is scanned by the go row; a finding-bearing file inside one of them is
+# the measurement of that, and the control below is what keeps it from being a
+# reading of the comment: the SAME file, one directory up, must come back as a
+# finding. See the note in the go face of tests/security/sast.sh.
+plant_testdata "$TD_PLANT"
+if ! in_surface "$TD_PLANT"; then
+  fail "case 9: the plant's package directory $TD_PLANT is not in the derived surface, so the row never reaches the testdata/ beside it"
+elif in_surface "$TD_PLANT/testdata"; then
+  fail "case 9: 'go list ./...' now returns $TD_PLANT/testdata as a package of this module, so the premise of the testdata verdict has moved"
+elif ignored "$TD_PLANT/testdata/planted.go" || ignored "$TD_PLANT/testdata"; then
+  fail "case 9: git ignores the plant's testdata/ (or the file in it), so a green row there would say nothing about the package pattern"
+elif ! in_go_files "$TD_PLANT/probe.go"; then
+  fail "case 9: $TD_PLANT/probe.go is not in the file set the row feeds its surface check, so the row never looks at this directory"
+else
+  run_row testdata-fixture
+  if [ "$ROW_RC" -ne 0 ]; then
+    row_fails "case 9: the row is not green with a finding-bearing Go file under a testdata/ directory — it is being scanned"
+  elif grep -qF "$TD_PLANT/testdata/planted.go" "$ROW_LOG"; then
+    row_fails "case 9: the row named $TD_PLANT/testdata/planted.go — a testdata fixture is in the surface"
+  else
+    ok "case 9: green — the fixture under testdata/ was not scanned (the same package has a file the row does read)"
+  fi
+  # The control: the identical file, moved out of testdata/ into the package
+  # itself. If the row reports it here and not there, the difference is the
+  # directory name and nothing else — which is the whole of the verdict.
+  mv "$TD_PLANT/testdata/planted.go" "$TD_PLANT/planted.go"
+  run_row testdata-control
+  if reported_as_finding "$TD_PLANT/planted.go"; then
+    ok "case 9 control: the same file one directory up IS reported — so the verdict above is about testdata/, not about the row's reach"
+    grep -E "^  $TD_PLANT/planted.go" "$ROW_LOG" | sed 's/^/     /'
+  elif grep -qF "$TD_PLANT  — git-ignored by" "$ROW_LOG"; then
+    row_fails "case 9 control: the row refused the file as an escape instead — $TD_PLANT is git-ignored"
+  else
+    row_fails "case 9 control: the row did not report the finding of $TD_PLANT/planted.go either, so case 9 measured nothing about the scan surface"
+  fi
+  rmdir "$TD_PLANT/testdata" 2>/dev/null || true
+fi
+rm -rf "$TD_PLANT"
+
+# ---------------------------------------------------------------------------
+step "10. the plants of cases 7-9: the row is green again, and they are all gone"
+# The same last question case 6 asks about its own three plants, asked without
+# removing anything first — a cleanup followed by a check that the thing is
+# gone checks nothing, and the plants of cases 7-9 are the ones that would
+# follow every later run of this instrument (and of the row) if one were left:
+# they carry a .gitignore that ignores `*.go`, and one of them an ignored file
+# with a finding of its own. So this step asks the tree, not its own rm.
+run_row clean-after-negation
+if [ "$ROW_RC" -ne 0 ]; then
+  row_fails "case 10: the row is not green after cases 7-9 — one of their plants is still in the tree (a file carrying a finding, or a rule that ignores a source file)"
+elif [ -e "$NEG_FILE_PLANT" ] || [ -e "$NEG_DIR_PARENT" ] || [ -e "$TD_PLANT" ]; then
+  fail "case 10: this script left a plant of cases 7-9 behind"
+else
+  ok "case 10: green again, and the three plants of cases 7-9 are gone"
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n== sast-go-surface-check: summary ==\n'
 if [ "$FAILS" -gt 0 ]; then
   printf 'sast-go-surface-check: FAILED — %d finding(s)\n' "$FAILS" >&2
   exit 1
 fi
-printf 'sast-go-surface-check: OK — six cases: the derived surface is green and prints itself, a copy\n'
+printf 'sast-go-surface-check: OK — ten cases: the derived surface is green and prints itself, a copy\n'
 printf 'under an ignored dot directory is out of it, a package directory git ignores is dropped and\n'
 printf 'named with its rule, an ignored file inside a package that stays fails the surface by name,\n'
-printf 'POST_SAST_GO_TARGET still scans and prints what it is pointed at, and the tree was left as it\n'
-printf 'was found\n'
+printf 'POST_SAST_GO_TARGET still scans and prints what it is pointed at, every plant comes out\n'
+printf 'again, a file git RE-INCLUDES is not an escape, a package directory git RE-INCLUDES stays in\n'
+printf 'the surface and is scanned, a Go file under testdata/ is not scanned while the same file one\n'
+printf 'directory up is, and the tree was left as it was found\n'

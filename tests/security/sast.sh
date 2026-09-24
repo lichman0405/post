@@ -3,7 +3,7 @@
 # SAST — the static application security testing face of the Master
 # Security/Quality Gate (docs/23_SECURITY_PRIVACY.md §11 "SAST").
 #
-#   bash tests/security/sast.sh go       # gosec over the whole Go module
+#   bash tests/security/sast.sh go       # gosec over this module's OWN PACKAGES — see §5
 #   bash tests/security/sast.sh python   # bandit over the scientific adapter
 #   bash tests/security/sast.sh node     # eslint + eslint-plugin-security over apps/web and packages/ui
 #
@@ -60,6 +60,33 @@
 #     the surface arrives as a finding of a tree nobody reviewed. Every package
 #     directory the derivation drops is printed with the .gitignore rule that
 #     dropped it, so a surface that shrank is a line in the log, not a silence.
+#  6. WHAT THE PACKAGE PATTERN LEAVES OUT, AND WHY THOSE FILES ARE NOT SCANNED.
+#     `go list ./...` is a PATTERN, and a Go pattern never expands into a
+#     directory named `testdata` — the name is reserved for the go command's
+#     own data, not for source — so the 17 Go files this repository tracks
+#     under `testdata/` (`git ls-files '*.go' | grep -c testdata`, 2026-09-24)
+#     are not packages of this module and are not in the surface. The old walk
+#     from the repository root did read them; this row does not. That is the
+#     intended verdict and not a gap: they are the synthetic fixtures the
+#     contract harness is run against — one tree per case
+#     (tests/contract/testdata/cases/<case>/tree/api/main.go) and the route
+#     forms it enumerates (tests/contract/testdata/forms/api/**), read by
+#     tests/contract/*_test.go as INPUT — data for a test, not source of this
+#     repository. A finding in one of them would be a finding about a fixture,
+#     judged against a baseline whose every line is supposed to be a reviewed
+#     finding of this tree; none of them carries one today (0 entries of
+#     ops/ci/gosec-baseline.txt name a testdata path, 2026-09-24). What makes
+#     that a measurement rather than a reading of this paragraph: gosec is
+#     handed package DIRECTORIES and reads the files of those packages. A Go
+#     file carrying a G304 finding, planted in a `testdata/` directory of a
+#     package this row does scan, was NOT scanned — the row stayed green and
+#     its count did not move (783 files with the plant and without it,
+#     2026-09-24) — while the same file IS reported and the row goes red the
+#     moment the row is pointed at a directory with `/...`
+#     (POST_SAST_GO_TARGET), which is where gosec walks. Case 9 of
+#     tests/security/sast-go-surface-check.sh re-runs that pair on every use of
+#     the instrument, and moves the same file one directory up to show it
+#     reported there.
 #
 # Exit codes
 #   0  the pinned tool ran over the target, and every finding it reported is
@@ -104,9 +131,72 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 die() { echo "sast: $*" >&2; exit 1; }
-usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' | sed '/^$/q'; exit 2; }
+
+# The help text is this file's own header comment, printed as written: from
+# the line after the shebang to the first line that is not a comment. It used
+# to be `sed -n '2,30p'` cut at the first blank line, and line 2 is a bare `#`
+# — so `--help` printed nothing at all, and the one-line description of the go
+# face's surface lived inside text no user could see (2026-09-24, T1222).
+# A help text that cannot print is a claim nobody can read, which is how the
+# line stayed wrong: it now prints the whole block, blank lines included.
+usage() {
+  awk 'NR == 1 { next }                 # the shebang is not part of the text
+       /^#/     { sub(/^# ?/, ""); print; next }
+                { exit }' "${BASH_SOURCE[0]}"
+  exit 2
+}
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+check_ignore_hit() { # check_ignore_hit <line of 'git check-ignore -v'>  -> "<path><TAB><rule>", or exit 1
+  # WHAT A `git check-ignore -v` LINE SAYS, AND WHAT IT DOES NOT.
+  #
+  # `-v` prints ONE line per path whose last matching pattern git found:
+  #
+  #   <source>:<linenum>:<pattern><TAB><path>
+  #
+  # The pattern field is git's own verdict for that path, and a pattern that
+  # begins with `!` is a RE-INCLUSION: git's rule (gitignore(5)) is that such
+  # a path is NOT ignored, and that is what the path-specific question says —
+  # `git check-ignore -q -- <path>` exits 1 for it. The line is printed all
+  # the same, and the whole command exits 0, because a pattern matched.
+  # Measured on this tree, 2026-09-24 (T1222):
+  #
+  #   .gitignore: "*.go" / "!keep.go", with keep.go and drop.go beside it
+  #     git check-ignore -q -- keep.go     -> 1          (git does not ignore it)
+  #     git check-ignore -q -- drop.go     -> 0          (git does ignore it)
+  #     printf 'keep.go\ndrop.go\n' | git check-ignore --stdin -v   -> rc=0, two lines:
+  #       .../.gitignore:2:!keep.go<TAB>keep.go
+  #       .../.gitignore:1:*.go<TAB>drop.go
+  #   .gitignore: "negpkg/" / "!negpkg/", with the package directory negpkg
+  #     git check-ignore -q -- negpkg       -> 1
+  #     printf 'negpkg\n' | git check-ignore --stdin -v             -> rc=0, one line:
+  #       .../.gitignore:2:!negpkg/<TAB>negpkg
+  #
+  # Both callers below ask git exactly one question — "is this path ignored?"
+  # — so a `!` line is the answer NO. Read as a hit instead, it refuses a file
+  # git never ignored (a failed surface for a tree that is fine) and it drops
+  # a package directory that is this repository's source, which is the
+  # shrinking surface T1220 fixed, arriving through the check T1220 added.
+  #
+  # A `!` line cannot hide a path that IS ignored, which is the direction that
+  # would cost coverage: when a re-inclusion is overruled — its parent
+  # directory excluded (gitignore(5): "it is not possible to re-include a file
+  # if a parent directory of that file is excluded") — git prints the
+  # EXCLUDING pattern for that path, never the `!` one. Measured, same date:
+  # `.gitignore: "ignored/" / "!ignored/keep.go"` gives
+  # `check-ignore -q -- ignored/keep.go` -> 0 and `-v` prints the `ignored/`
+  # line for it.
+  #
+  # A line with no TAB is not a verdict line at all (`2>&1` puts anything git
+  # says on stderr into the same buffer), and is no more a hit than a `!` line.
+  local line="$1" hdr pat
+  case "$line" in *$'\t'*) ;; *) return 1;; esac
+  hdr="${line%%$'\t'*}"             # <source>:<linenum>:<pattern>
+  pat="${hdr#*:}"; pat="${pat#*:}"  # strip the source, then the line number
+  case "$pat" in '!'*) return 1;; esac
+  printf '%s\t%s\n' "${line##*$'\t'}" "$hdr"
+}
 
 report() { # report <tool> <report.json> <baseline> <id> <version> [rule-count]
   local tool="$1" file="$2" baseline="$3" id="$4" version="$5" rules="${6:-0}"
@@ -142,7 +232,7 @@ repo_paths_only() { # repo_paths_only <row id> <path>...  -> 0, or names the pat
   # under this repository's own runtime state is ignored on purpose, and a
   # tracked file of it is not.
   local id="$1"; shift
-  local p bad=() inside=() out line rc
+  local p bad=() inside=() out line hit rc
   for p in "$@"; do
     case "$p" in
       "$ROOT"|"$ROOT"/*) inside+=("$p");;
@@ -163,9 +253,12 @@ cannot say what it scanned."
     case "$rc" in
       0) while IFS= read -r line; do
            [ -n "$line" ] || continue
-           p="${line##*$'\t'}"
+           # read through check_ignore_hit: a `!` line is git saying this path
+           # is NOT ignored, and is not a hit (see the note above it)
+           hit="$(check_ignore_hit "$line")" || continue
+           p="${hit%%$'\t'*}"
            # named the way the rest of the row names files: relative to $ROOT
-           bad+=("${p#"$ROOT"/}  — git-ignored by ${line%%$'\t'*}, so it is local state, not source of this repository")
+           bad+=("${p#"$ROOT"/}  — git-ignored by ${hit#*$'\t'}, so it is local state, not source of this repository")
          done <<<"$out";;
       1) ;;
       *) printf '%s\n' "$out" | sed 's/^/     /' >&2
@@ -266,13 +359,18 @@ a scan of an empty surface reports no findings, which is indistinguishable from 
       # for all of them. `-v` is what makes the dropped list auditable: it
       # names the .gitignore line that did it, so a rule that is too broad is
       # visible in the row's own output instead of being a smaller surface.
+      # Read through check_ignore_hit, for the reason written there: a line
+      # whose pattern field starts with `!` is git re-including that package
+      # directory, and counting it as a hit takes a package of this module out
+      # of the surface while printing a rule that says the opposite.
       declare -A IGNORED_OF=()
       DROP_RC=0
       DROP_OUT="$(printf '%s\n' "${DIRS[@]}" | git -C "$ROOT" check-ignore --stdin -v 2>&1)" || DROP_RC=$?
       case "$DROP_RC" in
         0) while IFS= read -r line; do
              [ -n "$line" ] || continue
-             IGNORED_OF["${line##*$'\t'}"]="${line%%$'\t'*}"
+             hit="$(check_ignore_hit "$line")" || continue
+             IGNORED_OF["${hit%%$'\t'*}"]="${hit#*$'\t'}"
            done <<<"$DROP_OUT";;
         1) ;;   # nothing ignored: every package of the module is a package of this repository
         *) printf '%s\n' "$DROP_OUT" | sed 's/^/     /' >&2
