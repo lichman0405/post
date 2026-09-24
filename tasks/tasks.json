@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 160,
+  "task_count": 161,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9249,6 +9249,77 @@
       ],
       "scope_note": "`docs/21` 与 `docs/46` 把「不可变」当作存储层的性质，`CLAUDE.md` §9 第 5 条（Release / Asset Version immutable）与第 8 条（Nothing disappears; state only evolves）是同一类要求。这一笔补的是**数据库自己发出的拒绝**：在此之前，任何对这张表有写权限的东西——应用代码、psql、一个泄漏的凭证——都能就地改写一条已发布记录的 `rights_json`，也就是「发布者声明了哪些使用方式」那份声明，而且不留任何痕迹。它不改产品语义、不改权限模型、不改 API 契约，只是让表结构兑现它已经写在注释里的承诺。它不改产品语义、不改权限模型、不改 API 契约，只是让表结构兑现它已经写在注释里的承诺。**`infra/migrations/**` 有两个派生物**：`specs/database/postgres.sql`（生成的架构快照）和 `internal/persistence/sqlc/**`（由本仓 `sqlc.yaml` 从迁移生成、检入仓库的查询代码）——两者都在允许面内，因为覆盖迁移目录者必须能重新生成它要求保持一致的东西，否则一份它不许修的红会留在树上。**`specs/SPEC_VERSION.json` 也在允许面内，这是它的任务书原先漏掉的第三条链**：`infra/migrations/**` → `specs/database/postgres.sql`（声明过的派生物）→而 `specs/**` 下每一个文件都是 `specs/SPEC_VERSION.json` 的输入（`derived-artifacts.json` 自己的 `$comment` 就是这么写的），所以快照一动、标记必然跟着动。规则文件表达不了这第二条：它的 marker 是 **glob** `specs/**`，而只点名 `specs/` 下一个具体文件的 scope 条目盖不住那个 glob，于是派发时不报错、CI 也不报错，直到 collect 把**那份维持一致所必需的**文件拒掉。已合并的、带迁移又同时列了两个标记的任务有三笔（T1006 / T1007 / T0610）；本任务书自己的验收判据 [4] 一开始就把这个标记列在允许出现的路径里——判据是对的，是 scope 那行错了。",
       "supervisor_scope_narrowing": "这一笔有一个**结论要先给**，不要自己去选：**`knowledge_publications` 是 append-only。**\n\n理由两层，第二层是真正的证据：\n\n1. 表结构本来就是「发布这个动作发生过」这件事的记录，不是当前状态——\n   `published_by` + `published_at` + `rights_json` + `UNIQUE(object_version_id, public_version)`。\n   要纠正就追加一条新的 `public_version`，而不是把旧的那行改掉。\n\n2. **更要命的是：`infra/migrations/00083_knowledge_publication_identity.sql:66-73` 自己写着**\n   这份幂等账本 \"Append-only, **like the row it points at** and like the other ledgers\"——\n   它把「被它指向的那一行是 append-only」**当成前提写进了注释**，\n   而**没有任何东西在强制**。同一份迁移给 `knowledge_publication_creations` 装了两半\n   （`:118` 行级 BEFORE UPDATE OR DELETE、`:122` 语句级 BEFORE TRUNCATE），\n   却没碰它指向的那张表。`00014` 的行级名单（13 张）里也没有它。\n   T0013 的豁免理由（`tasks/results/T0013/RESULT.json`）把它和 `users`/`projects` 这类\n   真正的当前状态表并列——**这个归类对不上表结构，也和 00083 的前提互相矛盾。**\n\n**其余几条一并定死，不必再权衡：**\n\n- **两半都要**：`00014` 的行级 guard **和** `00015` 的语句级 TRUNCATE guard。\n  理由用 00083 自己的话：a ledger that can be truncated is not append-only and\n  TRUNCATE fires no row trigger。只装一半等于没装。\n- **复用 `append_only_guard()`**（`00014:28` 建的那个），**不要另写一套判据**。\n- 这张表要进 `tests/integration/append_only_test.go` 的 `appendOnlyTables` 清单，\n  并照 `00083`/`00128`/`00103` 的写法在文件顶部注释里补一段**为什么**。\n  那份清单同时驱动目录断言和逐表拒绝循环；`append_only_truncate_test.go` 从 `pg_trigger`\n  里查 `_no_truncate` 再跟这份设计清单**交叉核对**——两边少一边都会红。\n- **编号 00157**，文件名 `00157_knowledge_publications_append_only.sql`。编号是我在派工时定的，\n  **不要自己选号**，也不要改任何已有的迁移文件。\n- **与 T0013 归类的冲突由我记进 `tasks/decisions.md`**。`tasks/**` 对你是禁写范围，\n  你只把「该记什么、凭什么」写进 RESULT 的 `notes_for_supervisor`，我来落账。\n- **#228 的正文里有一处已经过期，别照抄**：它说 `PublishKnowledgePublication`「在 sqlc\n  生成代码之外没有任何调用者」「此时加触发器不会破坏任何代码」。那是它写下的时点；\n  T0805 后来合了（`fc78310`），现在 `internal/persistence/knowledge_publish_store.go:291`\n  就在调它——**表已经有产品写入路径了**。评估风险时以树为准，不以issue正文为准。\n\n**为什么这不是「加个约束」而是「补一个谎」**：注释里承诺的不可变不是机制，\n只有触发器发出的那声拒绝才是。这一笔交付的是后者。"
+    },
+    {
+      "id": "T1219",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "工人的写入约束管不到 `Write`/`Edit`：守卫的 matcher 只列了五个工具，而那正是 collect 采信的那份记录的写入口",
+      "v1_required": false,
+      "dependencies": [
+        "T1202"
+      ],
+      "tests": [
+        "a write outside the worker's envelope is refused when it arrives through the Write tool, not only through a shell redirection",
+        "a write inside the worker's own worktree is still allowed through the Write tool",
+        "a read of a credential store is refused when it arrives through a reading tool the matcher does not name",
+        "the guard's two-sided regression suite is executed by something CI runs",
+        "the embedded guard script and the .rddev.example copy stay byte-identical"
+      ],
+      "allowed_scope": [
+        "internal/devorchestrator/**",
+        "tests/worker-guard/**",
+        ".rddev.example/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "tests/**（`tests/worker-guard/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "specs/orchestrator/worker-permissions.yaml",
+        "docs/60_AGENT_SAFETY_BOUNDARIES.md",
+        "docs/63_WORKER_CONTRACT.md"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话。** 下面每一处都给了文件与行号，先到树里逐条核一遍；核出来与我说的不一样，**以树为准**并在 RESULT 里写明。",
+        "**这个洞的形状，请你自己复核一遍再动手。** `internal/devorchestrator/worker_guard.go:120` 把 PreToolUse 的 matcher 写成 `Bash|Read|Grep|Glob|NotebookRead` 五个工具；而生成的 `worker-settings.json` 里 `permissions.defaultMode` 是 `dontAsk`、`permissions.allow` 是 `[\"Bash\",\"Write\",\"Edit\"]`。**于是 `Write` 与 `Edit` 是被允许的，而钩子根本看不到它们。** `internal/devorchestrator/embed/worker-guard.sh` 的头文件自述它管的是「shell writes (rm/cp/mv/ln/install/tee and >/>> redirections) are confined to the Worker's own worktree, its own result dir and /tmp」——**这句话对 `Write`/`Edit` 不成立。**",
+        "**要害在于收工判据读的那份记录是谁能写的。** `internal/devorchestrator/worker_collect.go:129` 的 `LoadGateInputs` 读 `.rddev/runtime/tasks/<TASK>/gate-inputs.json`，注释称它为「The authoritative spawn-time record ... Collect judges by THESE values」；而 `:269` 的作业范围判据 `scopes = gate.AllowedScope` **正是从这个文件里取的**。防篡改的 `VerifyGateInputs`（`:148-151`）比的是**工人可写的那几份副本**与它，列出的范围是 registry 字段 / `task-package.json` / 守卫层 / `exit.status`，**不含 `DispatchedAt` 与 `ResultSHAAtSpawn`**（T1217 新加的那两个字段）。而 `specs/orchestrator/worker-permissions.yaml` 的 `collection_invariants` 自己写着一条原则：归属判定「reads Supervisor-owned records only — **never a field the gated party can write or choose**」。**这个洞与那条原则直接冲突——所以修它不需要发明任何新的安全语义。**",
+        "**要求：任何能读写文件的工具，都受 Bash 那条路所受的同一套限制。** 两半都要：\n\n  * **写**只能落在工人自己的工作树、它自己的结果目录、以及 `/tmp`；\n  * **读**不得触及凭据存储（`~/.config/gh`、`~/.ssh`、`~/.gnupg`、`~/.docker`、`~/.aws`、`~/.git-credentials`、`~/.netrc`、`~/.claude`）、除 `.env.example` 外的 `.env`、以及工人工作树与结果目录之外的仓库 `.rddev/` 运行态。\n\n**工具清单不要凭记忆列。** 从 `permissions.allow` 与实际允许集**推导**，RESULT 里写明推导过程。至少覆盖 `Write`、`Edit`；并说明 `NotebookEdit` 这类不被 matcher 覆盖的工具你打算怎么办。",
+        "**有两条实现路线，选一条并写出你为什么选它，不要两条都上：**\n\n  1. **扩 matcher + 教 `worker-guard.sh` 认非 Bash 工具**：从 stdin 的 JSON 里取 `tool_name` 与 `file_path`，套用与 shell 写入同一套路径规范化与「落在哪里」的判定。既有脚本已经把 `~`/`$HOME`/`${HOME}` 与不可解析的 `$` 展开处理成 fail-closed，**这套保证要保持或变强，不许变弱**；\n  2. **生成按路径限定的 `permissions.deny`**：`worker-settings.json` 是**按任务生成**的，所以工作树的绝对路径在 spawn 时已知，deny 可以写死在生成器里。\n\n两条路都可以。**如果你判断需要同时用，先说明为什么单独一条不够。**",
+        "**第二处缺口与第一处同源，请在同一个交付里收掉：`tests/worker-guard/guard-regression.sh` 自称是守卫的双侧回归套件，但没有任何东西在跑它。** `.github/workflows/ci.yml` 对它零命中、Makefile 零命中、没有任何 Go 测试调用它（**自己去核一遍，别信我**）。**所以第一处的修法如果没有东西自动跑它，就又是一条「写在文件里的保证」。** 要求：让这套件**由 CI 会跑到的东西**执行（在 `internal/devorchestrator/` 下加一个 `_test.go` 去跑它是一条路；`.github/**` 与 `Makefile` 都是禁区，别去改）。",
+        "`internal/devorchestrator/embed/worker-guard.sh` 与 `.rddev.example/guard/worker-guard.sh` **必须保持逐字节相同**——`worker_guard_test.go:21-26` 就在查这件事，你会撞上它。`.rddev.example/**` 已在你允许面内。",
+        "`internal/devorchestrator/worker_render.go:529` 告诉工人「A PreToolUse guard hook confines your shell writes, file reads and control-plane commands」。**改完守卫之后这句话必须变成真的**；如果它仍然只对 Bash 成立，就改它。",
+        "**不许为了让什么变绿而放宽任何判据。** 不许删、不许跳过、不许放宽 `tests/worker-guard/guard-regression.sh` 里既有的用例；不许把信封开大；不许删掉凭据存储那条读限制。**判据的真假不该取决于你改了哪一行。**"
+      ],
+      "deliverables": [
+        "`internal/devorchestrator/embed/worker-guard.sh`（必要时含 `worker_guard.go` 的 matcher）与逐字节同步的 `.rddev.example/guard/worker-guard.sh`：把读/写限制扩展到 Bash 之外的写文件工具。",
+        "`tests/worker-guard/guard-regression.sh` 的新用例：每条新规矩**两侧**——必须被拒的一侧、必须放行的一侧。",
+        "让那套件**由 CI 会跑到的东西**执行的证据（`internal/devorchestrator/` 下的 `_test.go` 或等价），以及它会红的 MUTATION CHECK 输出。",
+        "一份属于本轮的 `RESULT.json`：上面每一条判据各自的证据，含你复核洞的形状后与我说的不一致的地方。"
+      ],
+      "acceptance_criteria": [
+        "**洞真的关了，而且是用 `Write` 工具关的**：给出实际输出——一次**经 `Write` 工具**写到信封外（例如 `.rddev/runtime/tasks/<TASK>/gate-inputs.json`，或工作树外的任意路径）被**拒绝**，一次写到自己的工作树内被**放行**。**必须是 `Write` 这条路径**，不是 `sh -c 'echo > ...'`——后者本来就受限，证明不了你修的东西。",
+        "**这个判据能红**：MUTATION CHECK——把你这处改动撤掉，同一个用例必须**不再被拒**（给出撤销后的实际输出），然后还原。**修之前红不了的话，这一条就是构出来的。**",
+        "**信封没有被开大**：`bash tests/worker-guard/guard-regression.sh` 全绿，且用例数**不少于**改前（给出改前与改后的 PASS/总数原文）。既有的凭据存储读限制仍在。",
+        "**那套件现在真的有人跑**：给出**由 CI 会执行的那条命令**（`go test ./internal/devorchestrator/` 或等价）跑出该套件的实际输出，并另给一个把套件自己弄红、确认它真会红的证据。",
+        "**matcher 与 allow 对得上**：给出生成后的 `worker-settings.json` 的 matcher 与 allow 原文，并逐个说明 `allow` 里的每个工具是被 matcher 覆盖、还是被别处挡住、还是你判断无需限制——**要给出理由，不要只列表**。",
+        "**没有放宽任何东西**：`git diff` 里不出现被删/被跳过的既有用例、不出现被移除或放宽的路径检查、不出现绕过手段；给出 diff 原文。"
+      ],
+      "scope_note": "这一笔是**修一个已经写在文件里的保证没有真的成立**，不是新增能力，也没有改任何产品语义。守卫脚本的头文件自述「shell writes 被限制在工人的工作树/结果目录/`/tmp`」，而它的 matcher 只认 `Bash|Read|Grep|Glob|NotebookRead` 五个工具，`Write`/`Edit` 却同时在 `allow` 里——**保证写在一处，强制它的东西在另一处且更窄**（同一族缺陷在本项目的第三次）。它要紧，是因为 `worker_collect.go:269` 拿来判作业范围的 `gate.AllowedScope` **取自一个工人用 `Write` 就能改的文件**；而 `specs/orchestrator/worker-permissions.yaml` 的 `collection_invariants` 已经把「不得采信被判定方写得进去的字段」写成原则。第二处（那套双侧回归测试没有任何东西在跑）之所以并进同一笔，是因为**不并进来，第一处的修法就没有东西在守**。",
+      "supervisor_scope_narrowing": "**为什么把 `tests/worker-guard/**` 与 `.rddev.example/**` 收进允许面：**\n\n  * `tests/**` 通常关着，是为了不让工人弱化测试。这一笔**必须**在那套双侧回归测试里加用例（那是守卫规矩唯一被两侧证明过的地方），所以只开 `tests/worker-guard/**` 这一条路径；**收工校验的是 `allowed_scope`，只放行允许面里的路径**，所以 `tests/**` 的其余部分仍然写不进去，而 `tests/worker-guard/guard-regression.sh` 里既有用例的任何删改都会在收工的 scope 检查上暴露出来。\n  * `.rddev.example/**` 是因为 `worker_guard_test.go:21-26` 强制内嵌脚本与它**逐字节相同**——不同步就会红，而它不在 `internal/devorchestrator/**` 里。\n\n**两条实现路线我不替你选**（这是 L1，你的判断）：扩 matcher 与生成 `permissions.deny` 各有取舍，**但选哪条都要给出理由**，并且**必须先自己复核那个洞确实存在**再动手——如果复核下来它不存在（比如某个我没看到的层已经挡住了），**照实写进 RESULT 说它不存在**，那一笔就变成「加固一个原本就成立的东西」，按判据第 2 条给出证据即可，不要为了交差去造一个洞。"
     }
   ]
 }

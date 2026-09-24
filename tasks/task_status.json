@@ -12381,6 +12381,10 @@
           "reason": "pr merge via rddev (four gates green)"
         }
       ]
+    },
+    "T1219": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，P13 第四笔）：T1217 的评审带出来的一件事，比 T1217 本身大得多——**工人的写入约束对 `Write`/`Edit` 工具根本没生效。** `internal/devorchestrator/worker_guard.go:120` 把 PreToolUse 的 matcher 写死成 `Bash|Read|Grep|Glob|NotebookRead`，而生成的 `worker-settings.json` 里 `permissions.defaultMode` 是 `dontAsk`、`permissions.allow` 含 `Write`、`Edit`——**被允许的工具，钩子看不到。** 守卫脚本自己的头文件写着「shell writes 被限制在工人的工作树/结果目录/`/tmp`」，**那句话对 `Write`/`Edit` 不成立**。要紧在哪：`worker_collect.go:129` 的 `LoadGateInputs` 读 `.rddev/runtime/tasks/<TASK>/gate-inputs.json`，注释称它为「The authoritative spawn-time record ... Collect judges by THESE values」，而 `:269` 的作业范围判据 `scopes = gate.AllowedScope` **正是取自这个文件**——一个工人用 `Write` 就能改的文件。防篡改的 `VerifyGateInputs`（`:148-151`）比的是工人可写的那几份副本与它，**不含 T1217 新加的 `DispatchedAt` / `ResultSHAAtSpawn`**。**与第 52 条、㊿ 同族，第三次**：保证写在一处，强制它的东西在另一处且更窄；而 `specs/orchestrator/worker-permissions.yaml` 的 `collection_invariants` 已把「归属判定不得采信被判定方写得进去的字段」写成原则——**所以修它不需要发明新的安全语义**（按 §5.1 属 bug fix，L1，不等批准）。同一笔收第二处：`tests/worker-guard/guard-regression.sh` 自称双侧回归套件，**`.github/workflows/ci.yml`、Makefile、Go 测试全都对它零命中**——第一处的修法没有东西在守就又是一条「写在文件里的保证」。`allowed_scope` 只开 `internal/devorchestrator/**`、`tests/worker-guard/**`（`tests/**` 的其余部分仍关着）、`.rddev.example/**`（逐字节同步由 `worker_guard_test.go:21-26` 强制）。`v1_required=false`：加固，不改产品语义。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。"
     }
   },
   "version": 2

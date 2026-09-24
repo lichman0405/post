@@ -1870,6 +1870,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1219-TEST-01",
+      "task_id": "T1219",
+      "name": "a write outside the worker's envelope is refused when it arrives through the Write tool, not only through a shell redirection",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
