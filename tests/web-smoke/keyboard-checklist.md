@@ -103,9 +103,16 @@ On `/` (desktop, 1280×800):
   Notifications, Sign in — with a visible focus indicator on every stop;
 - the search form submits to `/search?q=catalyst` by keyboard alone, and the
   page shows the submitted query;
-- on that same route the answer itself really renders (`[data-search-answer]`
-  is in the DOM, and the error state is not) — so what section B3 below asks
-  you to listen for is a live region that is actually there to announce;
+- on that same route the ANSWERED branch really renders, and what proves it is
+  the citation the route requires: `a11y-smoke.mjs`'s `/search?q=catalyst`
+  route demands `[data-search-citation]` with `[data-search-fallback]`
+  forbidden, and names the ref the harness's fixture seeded. So what section B3
+  below asks you to listen for is a live region that is actually there to
+  announce. Note what is NOT the proof: `[data-search-answer]`, which sits on
+  the body BOTH ready states render — the fallback carries it too, so "it is in
+  the DOM" would be satisfied by a page whose own heading is the no-source
+  notice. The fallback has its own route (`/search?q=zzqx`) and its own check
+  in the same suite, where the citation is what must be absent;
 - `Enter` on the Projects nav link navigates to `/projects` and the heading
   there is "Projects";
 - no element on the page has a positive `tabindex`.
