@@ -40,14 +40,29 @@ enforces:
   spawned with `--docker` (POST_WORKER_DOCKER_GRANT=1);
 - file reads confined: credential stores, `.env` files (except
   `.env.example`) and other Workers' runtime state blocked;
-- shell writes (rm/cp/mv/ln/install/tee, `>`/`>>` redirections) confined to
-  the Worker's own worktree, its result dir and `/tmp`; unresolvable `$`
-  paths fail closed;
+- writes confined to the Worker's own worktree, its result dir and `/tmp`,
+  whichever tool makes them — shell writes (rm/cp/mv/ln/install/tee,
+  `>`/`>>` redirections) and the file-writing tools (Write/Edit/MultiEdit/
+  NotebookEdit) go through the same normalisation and the same allow-set;
+  unresolvable `$` paths fail closed;
 - missing contract environment (POST_*) fails closed.
+
+The matcher above decides WHICH tools reach the hook, and a tool missing from
+it is a tool the guard never sees whatever the list above claims — Write and
+Edit were in `permissions.allow` and absent from the matcher until T1219, so
+`dontAsk` ran them bare to any path. `TestWriteGuardFiles` derives the
+matcher's required contents from `permissions.allow`, and
+`TestGuardMatcherNamesExactlyTheKnownTools` fixes the set in both
+directions, so that seam cannot be reopened quietly; the tools that name a path but are refused by the
+permission layer today (Read/Grep/Glob/NotebookRead/NotebookEdit/MultiEdit)
+stay in the matcher so the envelope does not rest on that accident.
 
 Every rule has a two-sided regression test: the dangerous action is blocked
 AND the legitimate neighbouring action is allowed
-(`tests/worker-guard/guard-regression.sh`).
+(`tests/worker-guard/guard-regression.sh`). That suite is executed by
+`TestGuardRegressionSuiteRunsWhereCIRunsIt`, which runs it against the
+embedded script on every `go test ./...` — including CI's `go` job — so it is
+a gate rather than a file nothing reads.
 
 ## worker-settings.json (example)
 
@@ -55,7 +70,7 @@ AND the legitimate neighbouring action is allowed
 {
   "permissions": {
     "defaultMode": "dontAsk",
-    "allow": ["Bash"],
+    "allow": ["Bash", "Write", "Edit"],
     "deny": [
       "Bash(git commit:*)",
       "Bash(git push:*)",
@@ -68,7 +83,7 @@ AND the legitimate neighbouring action is allowed
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Read|Grep|Glob|NotebookRead",
+        "matcher": "Bash|Read|Grep|Glob|NotebookRead|Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [{"type": "command", "command": "sh /ABS/PATH/guard/worker-guard.sh"}]
       }
     ]

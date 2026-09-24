@@ -100,10 +100,10 @@ type workerSettings struct {
 // Write(env:POST_WORKER_RESULT_DIR/**)) denied every write, allowed path
 // included. Path-scoped rules in the allow list would be dead rules that
 // read as confinement without providing any (worse than none). The write
-// envelope is enforced where it actually works: the guard hook for shell
-// writes, and the collect-time allowed_scope diff for the worktree. A
-// path-scoped entry must never reappear without re-proving it on the pinned
-// claude version (test below asserts this).
+// envelope is enforced where it works: the guard hook, for shell writes and
+// for the Write/Edit tools guardMatcher names, plus the collect-time
+// allowed_scope diff for the worktree. A path-scoped entry must never
+// reappear without re-proving it on the pinned claude version (test below).
 func renderSettings(guardPath string) ([]byte, error) {
 	var s workerSettings
 	s.Permissions.DefaultMode = "dontAsk"
@@ -117,7 +117,7 @@ func renderSettings(guardPath string) ([]byte, error) {
 			Command string `json:"command"`
 		} `json:"hooks"`
 	}{{
-		Matcher: "Bash|Read|Grep|Glob|NotebookRead",
+		Matcher: guardMatcher,
 		Hooks: []struct {
 			Type    string `json:"type"`
 			Command string `json:"command"`
@@ -332,3 +332,59 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%ds", d/time.Second)
 }
+
+// guardMatcher is the PreToolUse matcher: the tool names that reach
+// worker-guard.sh, wired into worker-settings.json by renderSettings above.
+// It is the seam the whole hook hangs on — a tool absent from it is a tool
+// the guard never sees, whatever the guard's own text says it enforces.
+//
+// It listed Bash|Read|Grep|Glob|NotebookRead until T1219, while
+// permissions.allow carried Write and Edit. dontAsk therefore ran those two
+// bare and the hook was never invoked for them, so the write envelope the
+// guard documents (worktree / result dir / /tmp) did not hold for the two
+// tools most likely to be used to leave it. Reproduced live before the fix: a
+// real claude session driven by this exact generated settings file wrote
+// .rddev/runtime/tasks/<TASK>/gate-inputs.json through the Write tool and
+// reported CREATED-OK — the authoritative record collect reads allowed_scope
+// from. The same probe against the fixed matcher is refused.
+//
+// Why this declaration sits at the END of the file rather than beside
+// renderSettings: ops/ci/gosec-baseline.txt keys its entries by
+// `path:line:column:RULE`, so inserting a line anywhere above a baselined
+// finding in this file makes that finding unbaselined and reds the sast-go
+// row (T1217 hit this). ops/** is Supervisor-owned, so the file that could
+// re-number the baseline is not one this change may touch; the comment comes
+// last instead of the baseline coming first.
+//
+// The list is derived, not remembered: every tool a Worker can point at a
+// path must be here. TestWriteGuardFiles derives that requirement from
+// permissions.allow itself, and TestGuardMatcherNamesExactlyTheKnownTools
+// fixes the set in both directions — a future tool that becomes allowed
+// without becoming visible fails a test instead of silently escaping the
+// envelope the way Write and Edit did.
+//
+// Tools that are NOT here are not a second, quieter way around the guard:
+//
+//   - Read/Grep/Glob/NotebookRead are matched AND refused outright by the
+//     permission layer (they are absent from allow, and dontAsk denies an
+//     unlisted tool — probed live on 2.1.281: "Permission to use Read has
+//     been denied because Claude Code is running in don't ask mode"). They
+//     stay in the matcher so the read confinement holds at the hook too, and
+//     so it survives them ever being allowed.
+//   - NotebookEdit/MultiEdit are matched for the same reason: the permission
+//     layer refuses them today, and matching them costs nothing while making
+//     the envelope independent of that accident.
+//   - Non-file tools (Task, TodoWrite, WebFetch, StructuredOutput, Skill, …)
+//     name no path, so no path policy applies to them. An unknown tool name
+//     exits the guard silently by design (see the hook-protocol note in
+//     embed/worker-guard.sh).
+//
+// Route NOT taken (T1219): generating a path-scoped permissions.deny from the
+// absolute worktree path, which spawn knows at generation time. Deny can only
+// express the complement of an envelope, never the envelope: "worktree, result
+// dir and /tmp" would have to be written as "everything else", an unbounded
+// list that fails open on every path nobody enumerated. An allow-list is what
+// this envelope needs, and path-scoped allow rules are the dead rule
+// renderSettings documents above, so the hook is the only layer that can
+// express it and one route is enough.
+const guardMatcher = "Bash|Read|Grep|Glob|NotebookRead|Write|Edit|MultiEdit|NotebookEdit"

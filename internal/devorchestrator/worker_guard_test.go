@@ -2,11 +2,13 @@ package devorchestrator
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,10 +34,15 @@ func TestGuardScriptEmbeddedMatchesExample(t *testing.T) {
 // hole).
 func TestGuardScriptHasFailClosedContract(t *testing.T) {
 	for _, want := range []string{
-		"refusing to decide a shell write",
+		// "file write", not "shell write": check_write_target now backs the
+		// file-writing tools as well as the shell-write policy, and a message
+		// that still said "shell" would be the same narrow-claim problem this
+		// task exists to fix, one layer down.
+		"refusing to decide a file write",
 		"refusing to decide a file read",
-		"pending = 1", // segment reset (second segment command position)
-		`*".env"*`,    // glob-pattern .env matching
+		"cannot parse the tool-input JSON", // the fail-closed arm of the path decoder
+		"pending = 1",                      // segment reset (second segment command position)
+		`*".env"*`,                         // glob-pattern .env matching
 	} {
 		if !strings.Contains(GuardScript(), want) {
 			t.Errorf("guard script missing %q", want)
@@ -97,8 +104,19 @@ func TestWriteGuardFiles(t *testing.T) {
 	}
 	hooks := settings["hooks"].(map[string]any)["PreToolUse"].([]any)
 	hook := hooks[0].(map[string]any)
-	if hook["matcher"] != "Bash|Read|Grep|Glob|NotebookRead" {
-		t.Errorf("hook matcher = %v", hook["matcher"])
+	if hook["matcher"] != guardMatcher {
+		t.Errorf("hook matcher = %v, want %q", hook["matcher"], guardMatcher)
+	}
+	// ...and it must actually cover the tools the allow list lets through.
+	// This is the T1219 seam: the matcher is the only thing that decides
+	// whether the hook runs at all, and it used to be narrower than the allow
+	// list, so Write and Edit ran bare and unseen.
+	matcher := hook["matcher"].(string)
+	for _, tool := range perms["allow"].([]any) {
+		name := tool.(string)
+		if !slices.Contains(strings.Split(matcher, "|"), name) {
+			t.Errorf("permissions.allow contains %q but the PreToolUse matcher %q does not name it: that tool runs in dontAsk mode with the guard never invoked for it, which is exactly how Write/Edit escaped the write envelope (T1219)", name, matcher)
+		}
 	}
 	cmd := hook["hooks"].([]any)[0].(map[string]any)["command"].(string)
 	if !strings.HasPrefix(cmd, "sh /") || !strings.HasSuffix(cmd, "/guard/worker-guard.sh") {
@@ -142,6 +160,152 @@ func TestWriteGuardFiles(t *testing.T) {
 		if strings.HasPrefix(a, "Write(") || strings.HasPrefix(a, "Edit(") {
 			t.Errorf("allow list contains path-scoped %q — claude 2.1.269 does not honor these in dontAsk mode (dead rule)", a)
 		}
+	}
+}
+
+// TestGuardMatcherNamesExactlyTheKnownTools: the matcher is derived and
+// checked in BOTH directions, because both directions fail open.
+//
+// A tool the matcher omits never reaches the guard — that is how Write/Edit
+// escaped (they were in permissions.allow, so dontAsk ran them bare while the
+// guard's own text promised a write envelope). A tool the matcher names but
+// that does not exist is worse than useless in the other way: it is a rule
+// that reads as confinement and matches nothing. So the matcher and this list
+// have to be the same set, and adding either side without the other is a
+// failure rather than a quiet drift.
+//
+// HOW THE LIST BELOW IS DERIVED (not remembered):
+//
+//  1. permissions.allow is {Bash, Write, Edit}. Every one of them must be
+//     matched — Bash is the shell tool, Write and Edit are the two file
+//     writers dontAsk would otherwise run unseen.
+//  2. Every tool a Worker can point at a path must be matched, whether or not
+//     it is allowed today: Read/Grep/Glob/NotebookRead (the read tools the
+//     guard confines) and NotebookEdit/MultiEdit (file writers the permission
+//     layer refuses today because they are absent from allow — an accident of
+//     the allow list, and not one the envelope should rest on).
+//  3. Non-file tools are deliberately absent: Task, TodoWrite, WebFetch,
+//     StructuredOutput and friends name no path, so no path policy applies to
+//     them. An unknown tool name exits the guard silently, by design.
+//
+// That derivation is asserted against permissions.allow in
+// TestWriteGuardFiles; this test fixes the set itself.
+func TestGuardMatcherNamesExactlyTheKnownTools(t *testing.T) {
+	// Derived from 1 and 2 above.
+	known := []string{
+		"Bash",
+		"Read", "Grep", "Glob", "NotebookRead",
+		"Write", "Edit", "MultiEdit", "NotebookEdit",
+	}
+	got := strings.Split(guardMatcher, "|")
+
+	inMatcher := map[string]bool{}
+	for _, n := range got {
+		if strings.TrimSpace(n) == "" {
+			t.Errorf("the matcher %q carries an empty alternative, which matches nothing", guardMatcher)
+		}
+		if inMatcher[n] {
+			t.Errorf("the matcher %q names %q twice", guardMatcher, n)
+		}
+		inMatcher[n] = true
+	}
+	for _, n := range known {
+		if !inMatcher[n] {
+			t.Errorf("the matcher %q does not name %q: a tool named no path policy reaches the guard for it", guardMatcher, n)
+		}
+	}
+	for _, n := range got {
+		if !slices.Contains(known, n) {
+			t.Errorf("the matcher %q names %q, which is not on the derived tool list — either it has no path and does not belong, or the derivation above is out of date", guardMatcher, n)
+		}
+	}
+
+	// The tools the guard's own header claims confinement for. If the matcher
+	// ever stops naming one of these, that header becomes a promise nothing
+	// enforces — the exact defect this test exists for.
+	for _, n := range []string{"Write", "Edit"} {
+		if !slices.Contains(got, n) {
+			t.Fatalf("the matcher stopped naming %q: it is in permissions.allow, so dontAsk runs it in the Worker whether or not the guard sees it", n)
+		}
+	}
+}
+
+// TestFilePathToolsAreConfinedByTheGuard drives the embedded guard with the
+// tool-call JSON Claude Code actually sends for the file-path tools, and
+// checks the envelope holds for them exactly as it does for a shell write.
+//
+// The Write cases are the ones T1219 turns on, and they must go through the
+// Write tool's own payload shape: `sh -c 'echo > /etc/x'` was already
+// confined before this task and would prove nothing about the tool that was
+// not. The Edit/MultiEdit/NotebookEdit credential-store cases cover the other
+// half — these tools read the file they are about to change, so the read
+// confinement has to reach them too.
+func TestFilePathToolsAreConfinedByTheGuard(t *testing.T) {
+	dir := t.TempDir()
+	guard := filepath.Join(dir, "worker-guard.sh")
+	if err := os.WriteFile(guard, []byte(GuardScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"POST_REPO_ROOT=/repo",
+		"POST_WORKER_TASK_ID=T0001",
+		"POST_WORKER_WORKTREE=/repo/.rddev/worktrees/T0001",
+		"POST_WORKER_RESULT_DIR=/repo/.rddev/workers/T0001",
+	}
+
+	cases := []struct {
+		name      string
+		tool      string
+		field     string
+		path      string
+		wantBlock bool
+		reason    string
+	}{
+		// The required pair, through the Write tool.
+		{"Write outside the envelope", "Write", "file_path", "/repo/.rddev/runtime/tasks/T0001/gate-inputs.json", true, "confined"},
+		{"Write to /etc", "Write", "file_path", "/etc/x", true, "confined"},
+		{"Write inside the worktree", "Write", "file_path", "/repo/.rddev/worktrees/T0001/notes.txt", false, ""},
+		{"Write into the result dir", "Write", "file_path", "/repo/.rddev/workers/T0001/RESULT.json", false, ""},
+		// Edit / MultiEdit / NotebookEdit, both halves.
+		{"Edit to /etc", "Edit", "file_path", "/etc/hosts", true, "confined"},
+		{"Edit inside the worktree", "Edit", "file_path", "/repo/.rddev/worktrees/T0001/main.go", false, ""},
+		{"Edit a credential store", "Edit", "file_path", "~/.ssh/id_rsa", true, "credential store"},
+		{"MultiEdit a credential store", "MultiEdit", "file_path", "~/.netrc", true, "credential store"},
+		{"NotebookEdit outside the envelope", "NotebookEdit", "notebook_path", "/etc/nb.ipynb", true, "confined"},
+		{"NotebookEdit a credential store", "NotebookEdit", "notebook_path", "~/.aws/credentials", true, "credential store"},
+		{"NotebookEdit inside the worktree", "NotebookEdit", "notebook_path", "/repo/.rddev/worktrees/T0001/nb.ipynb", false, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{
+				"tool_name":  tc.tool,
+				"tool_input": map[string]any{tc.field: tc.path},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("sh", guard)
+			cmd.Env = append(os.Environ(), env...)
+			cmd.Stdin = bytes.NewReader(payload)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			runErr := cmd.Run()
+
+			blocked := false
+			if ee, ok := runErr.(*exec.ExitError); ok && ee.ExitCode() == 2 {
+				blocked = true
+			} else if runErr != nil {
+				t.Fatalf("running the guard: %v (%s)", runErr, out.String())
+			}
+			if blocked != tc.wantBlock {
+				t.Fatalf("%s %s=%q: blocked=%v, want %v — output: %s", tc.tool, tc.field, tc.path, blocked, tc.wantBlock, out.String())
+			}
+			if tc.wantBlock && !strings.Contains(out.String(), tc.reason) {
+				t.Errorf("blocked but the reason does not mention %q: %s", tc.reason, out.String())
+			}
+		})
 	}
 }
 

@@ -526,7 +526,15 @@ func RenderSystemPrompt(taskID, repoRoot, worktree, resultDir, worktreesDir stri
 	b.WriteString("- Never weaken, skip or delete tests to make a gate pass.\n")
 	b.WriteString("- Never modify product specifications to fit your implementation.\n")
 	b.WriteString("- Never implement `follow_up_issues` yourself.\n")
-	b.WriteString("- A PreToolUse guard hook confines your shell writes, file reads and\n  control-plane commands; a blocked tool call is the isolation working as\n  designed — adjust your approach, never try to bypass it.\n\n")
+	// "your writes", not "your shell writes": the guard confines writes
+	// whichever tool makes them (shell redirections and rm/cp/mv/ln/install/
+	// tee, and the Write/Edit tools), to the Worker's own worktree, its own
+	// result dir and /tmp. Saying "shell" here was accurate about the guard
+	// script and false about the session: Write/Edit were in
+	// permissions.allow and absent from the PreToolUse matcher, so they ran
+	// unseen until T1219. TestTheGuardClaimInTheSystemPromptIsTrue keeps this
+	// sentence and the matcher from drifting apart again.
+	b.WriteString("- A PreToolUse guard hook confines your writes (shell redirections and\n  rm/cp/mv/ln/install/tee, and the Write/Edit tools), your file reads and\n  your control-plane commands; a blocked tool call is the isolation working\n  as designed — adjust your approach, never try to bypass it.\n\n")
 	fmt.Fprintf(&b, "## Paths\n\n- Repo root: %s\n- Your worktree: %s\n- Your RESULT.json: %s\n- Other Workers' worktrees: %s (readable, never writable)\n", repoRoot, worktree, filepath.Join(resultDir, "RESULT.json"), worktreesDir)
 	b.WriteString("\n## RESULT.json\n\nWrite it EARLY and overwrite it as evidence improves. `completed` means\n\"submitted for acceptance\", not accepted. Report exact commands and real\nobserved output, and list in `tests[]` only commands you actually ran — the\nthird recording convention below decides where a command you could NOT run\nbelongs. If blocked, return `status: \"blocked\"` with the concrete blocker.\n")
 	b.WriteString("Your final message must be this document: the session runs with\n--json-schema, so the final output is schema-validated by claude itself, and\n`rddev worker collect` re-validates the file you wrote. A RESULT that does\nnot match specs/orchestrator/worker-result.schema.json (e.g. tests[].output\ninstead of evidence, acceptance[] as plain strings) is rejected at\ncollection.\n")
