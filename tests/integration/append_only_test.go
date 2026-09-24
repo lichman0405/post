@@ -89,8 +89,22 @@ const appendOnlyTaskID = "T0013"
 // remove. credit_disputes does NOT join this list: docs/13 §3's dispute has
 // a current state that governance closes IN PLACE, which is why it is on the
 // exempt list above and carries a targeted guard instead (see
-// targetedGuardTriggers). The same list drives the catalog assertion and
-// the per-table rejection loop.
+// targetedGuardTriggers). Migration 00157 (T1218) joins
+// knowledge_publications ITSELF — the row 00083 named as append-only and
+// left unguarded. 00083's own header calls the Idempotency-Key ledger it
+// creates append-only "like the row it points at", and takes both halves of
+// the guard for the ledger (00014's BEFORE UPDATE OR DELETE row trigger and
+// 00015's BEFORE TRUNCATE statement trigger) — while nothing enforced that of
+// the row it points at. The row IS history and not current state: it carries
+// published_by and published_at (the act, not a mutable attribute), the
+// rights_json the publisher published UNDER, and UNIQUE(object_version_id,
+// public_version) — so a correction appends a new public_version instead of
+// rewriting the declaration an earlier publication was made under, and an
+// in-place rewrite of rights_json is exactly the tamper the guard exists to
+// refuse. T0013's exemption list grouped this table with the current-state
+// tables (users, projects); that grouping contradicts both the columns and
+// 00083's premise, and the disclosure is recorded as issue #228. The same
+// list drives the catalog assertion and the per-table rejection loop.
 var appendOnlyTables = []string{
 	"scientific_object_versions",
 	"relation_versions",
@@ -126,6 +140,12 @@ var appendOnlyTables = []string{
 	// function — the private-side guard below is a separate, unbypassable
 	// INSERT-time rule on top of it.
 	"attestations",
+	// T1218 (00157): the publication row itself. It is the ledger 00083
+	// points at and declared append-only in its own header ("like the row it
+	// points at") without ever guarding it — the ledger that replays a
+	// publish was immutable while the publication it replays could still be
+	// rewritten under it. See the paragraph above the list.
+	"knowledge_publications",
 }
 
 // targetedGuardTriggers are the NON-append-only row guards added after
@@ -1004,6 +1024,38 @@ func TestAppendOnlyEnforcement(t *testing.T) {
 			},
 			del: func(id string) error {
 				_, err := pool.Exec(ctx, `DELETE FROM attestations WHERE id = $1`, id)
+				return err
+			},
+		},
+		{
+			// T1218 (00157): a published knowledge record. The row is the
+			// record that publishing HAPPENED — published_by, published_at,
+			// the rights_json the publisher published under — so the two
+			// writes that must not be possible are the ones that would make
+			// the record say something other than what it said: an in-place
+			// rewrite of the declaration (a different licence under the same
+			// publication, with the ledger that replays it unchanged) and the
+			// deletion of the row. A correction appends a new public_version.
+			//
+			// The insert is a raw INSERT rather than the publish command
+			// because the command's own end-to-end path is pinned separately
+			// (knowledge_publish_test.go, which publishes through
+			// persistence.KnowledgePublishStore) — that suite is what proves
+			// the guard does not block the legitimate writer; this loop is
+			// about the row's immutability.
+			table: "knowledge_publications",
+			insert: func() string {
+				return mustQueryUUID(`INSERT INTO knowledge_publications
+					(object_version_id, public_version, rights_json, published_by)
+					VALUES ($1, 'v1', '{"license":"CC-BY-4.0"}'::jsonb, $2) RETURNING id`, sov2, u1)
+			},
+			update: func(id string) error {
+				_, err := pool.Exec(ctx, `UPDATE knowledge_publications
+					SET rights_json = '{"license":"REWRITTEN"}'::jsonb WHERE id = $1`, id)
+				return err
+			},
+			del: func(id string) error {
+				_, err := pool.Exec(ctx, `DELETE FROM knowledge_publications WHERE id = $1`, id)
 				return err
 			},
 		},
