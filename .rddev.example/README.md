@@ -55,9 +55,19 @@ enforces:
   unresolvable `$` paths fail closed;
 - missing contract environment (POST_*) fails closed, and so does a tool call
   the guard cannot read: unparseable JSON, or a tool name / command / path
-  field holding something other than the string the rule needs. Only an
-  unknown tool name is allowed through (no path or command policy applies to a
-  tool that names neither).
+  field holding something other than the string the rule needs. An unknown tool
+  name is allowed through — no path or command policy applies to it — and so is
+  a file-tool call that names no path field, because those branches act on the
+  paths that are there: `{"tool_name":"Read","tool_input":{}}` exits 0, `Write`
+  carrying only `content` exits 0, and a `null` tool name leaves no branch to
+  choose and exits 0 as well. The Bash branch is the one that refuses an
+  ABSENCE: a Bash call whose `command` is absent, null or empty is blocked
+  (measured: `{"command":null}` → exit 2), because "nothing to inspect,
+  therefore nothing to worry about" is the fail-open this hook exists to close.
+  The guard's own header states the same boundary — a call with nothing to
+  check exits 0, except that the Bash branch refuses an absent `command` —
+  and the two were written against the same four measurements, not one against
+  the other's prose.
 
 The matcher above decides WHICH tools reach the hook, and a tool missing from
 it is a tool the guard never sees whatever the list above claims — Write and
