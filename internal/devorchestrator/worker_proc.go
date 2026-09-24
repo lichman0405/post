@@ -259,10 +259,10 @@ func procPids() ([]int, error) {
 
 // sessionResidue returns every live process whose session id equals
 // sessionLeader, excluding the leader itself when it is the spawn reaper
-// (run-worker.sh) still exiting — the reaper writes exit.status as its last
-// act, so a collect in that instant must not read the spawn machinery as
-// residue. The recorded Worker pid is excluded too: its liveness is the
-// registry's business, not residue.
+// (run-worker.sh): rddev's own machinery for this run, never residue the
+// Worker left — NOT "it may still be writing exit.status" (it outlives the
+// file by that cleanup; see worker_exit_timing.go). The recorded Worker pid
+// is excluded too: its liveness is the registry's business, not residue.
 func sessionResidue(sessionLeader, workerPID int) ([]ProcessFinding, error) {
 	pids, err := procPids()
 	if err != nil {
@@ -296,7 +296,7 @@ func sessionResidue(sessionLeader, workerPID int) ([]ProcessFinding, error) {
 		}
 		cmdline := procCmdline(pid)
 		if pid == sessionLeader && strings.Contains(cmdline, "run-worker.sh") {
-			continue // the reaper wrapping claude, exiting after exit.status
+			continue // the reaper wrapping claude: the run's own session leader
 		}
 		out = append(out, ProcessFinding{PID: pid, Cmdline: cmdline, Session: sess, PGID: pgrpOf(fields)})
 	}

@@ -278,12 +278,17 @@ echo "more" >> "$REPO/.rddev/worktrees/T0003/internal/config/deliverable.txt"
 fg_run "$REPO" review spawn T0003 --claude-bin "$FG_SCRATCH/bin/claude-silent"
 fg_assert_eq 0 "$FG_RC" "review spawn T0003 (attempt 2, writing no verdict)"
 # A re-dispatched review must not start on top of the previous attempt's
-# exit.status. That file is what an observer waits on (fg_wait_exit, and any
-# Supervisor watching the directory), so leaving it behind makes the wait
-# return before this attempt has done anything — and collect then judges a
-# review that is still running. Which way that lands is which process happened
-# to be alive at that instant: the acceptance job failed on exactly that
-# (issue #207), while the same step passed locally and on a re-run.
+# exit.status. That file is what a Supervisor watching the directory — and
+# rddev's own reconcile, which merges whatever code it finds — reads as "this
+# attempt ended with this code", so leaving it behind makes a reader judge the
+# new review by the old attempt's number before this attempt has done anything.
+# Which way that lands is which process happened to be alive at that instant:
+# the acceptance job failed on exactly that (issue #207), while the same step
+# passed locally and on a re-run.
+#
+# (fg_wait_exit no longer waits on this file — it waits on the recorded exit,
+# the fact collect requires. The file still has to be absent: it is the code
+# reconcile reads, and a stale one is a stale verdict about this attempt.)
 #
 # This attempt is stalled for seconds (see claude-silent above), so the file
 # cannot be here for any other reason: it is the previous attempt's.
@@ -293,6 +298,13 @@ else
   fg_ok "a re-spawned review starts with no exit.status of its own"
 fi
 fg_wait_exit "$REPO" T0003-review 30 || fg_fail "review T0003 attempt 2 did not exit"
+# ... and it waits on the RECORD, not on the file (#207). The reaper writes
+# exit.status about a second before it finishes collecting the run's process
+# group, so a waiter that returns at the file hands the caller a run that is
+# still being torn down, and collect then judges it. Falsifiable in the
+# direction that matters: revert fg_wait_exit to the file and this fails, because
+# the file is satisfied while the reaper still has its cleanup window ahead.
+fg_assert_reaper_stopped "$REPO" T0003-review "attempt 2's wait returned only after its reaper stopped"
 if ls "$REVIEW_DIR"/RESULT.superseded-*.json >/dev/null 2>&1; then
   fg_ok "the previous verdict was archived under the attempt it belongs to"
 else

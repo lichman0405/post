@@ -279,26 +279,26 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting the review reaper wrapper: %w", err)
 	}
-	pidCh := make(chan int, 1)
+	handoffCh := make(chan spawnHandoff, 1)
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		if sc.Scan() {
-			var pid int
-			if _, err := fmt.Sscanf(sc.Text(), "%d", &pid); err == nil {
-				pidCh <- pid
+			if h, ok := parseSpawnHandoff(sc.Text()); ok {
+				handoffCh <- h
 			}
 		}
-		close(pidCh)
+		close(handoffCh)
 	}()
-	var reviewPID int
+	var reported spawnHandoff
 	select {
-	case reviewPID = <-pidCh:
+	case reported = <-handoffCh:
 	case <-time.After(10 * time.Second):
 		// The whole group, not just the reaper (#166): the reaper leads the
 		// session, so anything it already started must go with it.
 		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the review reaper did not report a pid within 10s — review spawn aborted, nothing was recorded")
 	}
+	reviewPID := reported.PID
 	if reviewPID <= 0 {
 		_ = signalProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		return nil, fmt.Errorf("the review reaper reported an invalid pid — review spawn aborted, nothing was recorded")
@@ -306,23 +306,23 @@ func SpawnReview(opts *ReviewSpawnOpts) (*SpawnResult, error) {
 	sessionLeaderPID := cmd.Process.Pid
 	_ = cmd.Process.Release()
 
-	for _, pid := range []int{reviewPID, sessionLeaderPID} {
-		environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err != nil {
-			killWorker(reviewPID)
-			return nil, fmt.Errorf("review post-spawn environment assertion: reading /proc/%d/environ: %w — spawn aborted and the Reviewer killed", pid, err)
-		}
-		if leak := assertCleanWorkerEnv(environ); leak != "" {
-			killWorker(reviewPID)
-			return nil, fmt.Errorf("review post-spawn environment assertion: %s is present in the environment of pid %d — the Reviewer must not hold remote credentials, spawn aborted and the Reviewer killed", leak, pid)
-		}
+	// Post-spawn environment assertion (T0011 Defect 1), identical to the
+	// Worker's: the Reviewer must not hold remote credentials. A Reviewer that
+	// has already exited is witnessed through the reaper rather than refused —
+	// the refusal is what made a finished review run report failure (#133).
+	if err := assertSpawnedEnv(reviewPID, sessionLeaderPID); err != nil {
+		killWorker(reviewPID)
+		return nil, fmt.Errorf("review post-spawn environment assertion: %w — the Reviewer must not hold remote credentials, spawn aborted and the Reviewer killed", err)
 	}
 
 	startedAt := runStartedAt()
-	startTime, err := procStartTime(reviewPID)
+	// The start time the reaper read at the fork, or a direct /proc read here
+	// (see spawnStartTime). A Reviewer that returned before rddev could read
+	// /proc is recorded from the reaper's report instead of refused (#133).
+	startTime, err := spawnStartTime(reported, reviewPID)
 	if err != nil {
 		killWorker(reviewPID)
-		return nil, fmt.Errorf("reading /proc starttime for the Reviewer pid %d: %w", reviewPID, err)
+		return nil, fmt.Errorf("reading /proc starttime for the Reviewer pid %d (the reaper reported none either): %w", reviewPID, err)
 	}
 	claudeVersion, err := gitOutput2(claudeBin, "--version")
 	if err != nil {

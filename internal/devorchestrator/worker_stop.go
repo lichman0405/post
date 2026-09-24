@@ -16,7 +16,8 @@ import (
 // completed task.
 
 // stopGrace is how long stop waits between SIGTERM and SIGKILL, and how long
-// it waits for the reaper to record exit.status afterwards.
+// it waits (after each signal) for the reaper to finish: writing the code,
+// then collecting the Worker's process group.
 const stopGrace = 10 * time.Second
 
 // StopWorker signals the recorded Worker (SIGTERM, then SIGKILL after a
@@ -41,29 +42,47 @@ func StopWorker(repoRoot string, rec *WorkerRecord) error {
 	if err := signalProcessGroup(rec.PID, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("signalling Worker %s (pid %d): %w", rec.TaskID, rec.PID, err)
 	}
-	// Wait for the reaper to record exit.status; escalate to SIGKILL after
-	// the grace period, re-checking liveness before each signal.
-	deadline := time.Now().Add(stopGrace)
-	for time.Now().Before(deadline) {
-		if exitStatusFileExists(rec) {
-			break
-		}
-		if !pidAlive(rec.PID, rec.StartTime) {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if exitStatusFileExists(rec) {
-		return recordStop(repoRoot, rec)
-	}
-	if pidAlive(rec.PID, rec.StartTime) {
+	// Wait for the run to be over, then escalate to SIGKILL after the grace,
+	// re-checking liveness before the signal.
+	//
+	// "Over" is the reaper being gone, NOT exit.status existing (#243). The
+	// reaper writes the code first and collects the Worker's process group
+	// afterwards — deliberately, so a cleanup that fails cannot cost the
+	// record — so stopping at the file would hand back a machine that is still
+	// tearing the session down: the reaper's cwd is the Worker's worktree, and
+	// a caller that deletes that worktree the moment stop returns (a test
+	// removing its temp repo) leaves a live process sitting in a deleted
+	// directory. The reaper needs a moment after the file appears; that moment
+	// is exactly what this wait absorbs.
+	if !waitStopOver(rec) && pidAlive(rec.PID, rec.StartTime) {
 		if err := signalProcessGroup(rec.PID, syscall.SIGKILL); err != nil {
 			return fmt.Errorf("SIGKILL to Worker %s (pid %d): %w", rec.TaskID, rec.PID, err)
 		}
-		// give the reaper a moment to write exit.status
-		time.Sleep(500 * time.Millisecond)
+		// the reaper still records the code and finishes its own cleanup
+		waitStopOver(rec)
 	}
 	return recordStop(repoRoot, rec)
+}
+
+// waitStopOver waits, bounded by stopGrace, for the run to be over: the
+// session leader that writes the exit code is gone. For a record that never
+// named a reaper there is no writer to wait for, so the code being on disk is
+// the whole of the evidence (the same standard reconcileWorker applies).
+// Returns whether that state was reached; when it was not, StopWorker
+// escalates — and recordStop records what the file says either way, because
+// the record of how the Worker ended must not be hostage to a reaper that
+// never finishes.
+func waitStopOver(rec *WorkerRecord) bool {
+	deadline := time.Now().Add(stopGrace)
+	for {
+		if !reaperLive(rec) && (rec.SessionLeaderPID > 0 || exitStatusFileExists(rec)) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // recordStop merges the reaper's exit.status (or a synthetic -1 when none was

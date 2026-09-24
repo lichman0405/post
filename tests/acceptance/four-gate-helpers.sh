@@ -16,9 +16,20 @@ FG_FAILS=0
 fg_fail() { printf 'FAIL %s\n' "$*"; FG_FAILS=$((FG_FAILS+1)); }
 fg_ok()   { printf 'ok   %s\n' "$*"; }
 
-# fg_assert_eq WANT GOT LABEL — plain string equality with ok/fail output.
+# fg_assert_eq WANT GOT LABEL — plain string equality with ok/fail output. A
+# failure also prints the rddev run it is about ($FG_OUT, set by fg_run): a bare
+# "want [0], got [1]" hides the command's own message, and that message is the
+# only thing that says *why* a pipeline step returned non-zero. It is what made
+# issue #133 unanswerable for a week — the acceptance log recorded the code and
+# not one word of the refusal behind it.
 fg_assert_eq() {
-  if [ "$1" = "$2" ]; then fg_ok "$3"; else fg_fail "$3: want [$1], got [$2]"; fi
+  if [ "$1" = "$2" ]; then fg_ok "$3"; else
+    if [ "${FG_OUT+x}" = x ] && [ -n "$FG_OUT" ]; then
+      printf '\n==== rddev output (exit %s) ====\n%s\n' "${FG_RC:-unset}" "$FG_OUT"
+      unset FG_OUT
+    fi
+    fg_fail "$3: want [$1], got [$2]"
+  fi
 }
 
 # fg_assert_contains NEEDLE HAYSTACK LABEL
@@ -146,15 +157,122 @@ PY
   echo "$repo"
 }
 
-# fg_wait_exit REPO TASKID [TIMEOUT_SECS] — wait for the worker's exit.status.
+# fg_record_query REPO TASK [RUNID] — one field of a task's registry record, as
+# `rddev worker list --json` reports it (status, run_id, exit_status). With
+# RUNID it prints that run's exit_status, "-" when the run is not recorded yet;
+# without it, the current run_id. Prints nothing and returns 1 when the task has
+# no record at all.
+fg_record_query() {
+  local repo="$1" task="$2" run="${3:-}" raw rc
+  raw="$(cd "$repo" && "$FG_SCRATCH/bin/rddev" worker list --json 2>/dev/null)"; rc=$?
+  if [ $rc -ne 0 ]; then
+    fg_record_query_note "rddev worker list --json exited $rc"
+    return 1
+  fi
+  printf '%s' "$raw" | python3 -c '
+import json, sys
+task, want = sys.argv[1], sys.argv[2]
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+# The CLI wraps the array: {"workers": [...]}. Anything else is a shape this
+# instrument does not understand, and an instrument that guesses here is worse
+# than one that says it cannot read the answer. (Getting this wrong once cost a
+# whole e2e run: a bare-list assumption made every poll exit non-zero and the
+# waiter reported "did not exit" about a Worker that had exited.)
+views = doc.get("workers") if isinstance(doc, dict) else doc
+if not isinstance(views, list):
+    sys.exit(2)
+for v in views:
+    if not isinstance(v, dict):
+        continue
+    if v.get("task_id") != task:
+        continue
+    if not want:
+        print(v.get("run_id", ""))
+        sys.exit(0)
+    if v.get("run_id") == want:
+        print(v["exit_status"] if v.get("exit_status") is not None else "-")
+        sys.exit(0)
+sys.exit(1)' "$task" "$run"
+  rc=$?
+  # 2 = the output was not the shape this helper reads; 1 = no such record yet
+  # (the normal answer while polling). Only the first is worth a word.
+  if [ $rc -eq 2 ]; then fg_record_query_note "unreadable worker list output: $(printf '%s' "$raw" | head -c 200)"; fi
+  return $rc
+}
+
+# fg_record_query_note MSG — say why the registry reading is unavailable, at
+# most once per run (a poll loop must not repeat it 80 times).
+fg_record_query_note() {
+  [ -e "$FG_SCRATCH/record-query-warned" ] && return 0
+  : > "$FG_SCRATCH/record-query-warned"
+  printf 'NOTE fg_record_query: %s\n' "$*" >&2
+}
+
+# fg_wait_exit REPO TASKID [TIMEOUT_SECS] — wait for the run that collect will
+# judge to be over, judged by the fact collect judges it by: rddev's recorded
+# exit (the registry's exit_status for THIS run).
+#
+# Not exit.status on disk (#207). The reaper writes that file FIRST and only
+# then collects the Worker's process group, so a waiter that stops at the file
+# returns with the run's session still being torn down — and the file it saw
+# need not even be this attempt's (the previous attempt's survives on disk until
+# the re-spawn rewrites it). The run_id is pinned before waiting, so the answer
+# is about the attempt this call followed and never about the one before it. The
+# recorded exit is merged by reconcile once the reaper has stopped running, the
+# same condition review/worker collect require before they look at anything
+# else: one fact, waited on by both sides.
 fg_wait_exit() {
-  local repo="$1" task="$2" tmo="${3:-30}" n=0
+  local repo="$1" task="$2" tmo="${3:-30}" n=0 run="" exits=""
+  # pin the run first; the spawn that this wait follows has already written it.
+  # Its own counter: the timeout below is the budget for the wait, and spending
+  # part of it on pinning would shorten the very wait it is meant to bound.
+  while [ $n -lt 40 ] && [ -z "$run" ]; do
+    run="$(fg_record_query "$repo" "$task" || true)"
+    if [ -z "$run" ]; then sleep 0.25; n=$((n+1)); fi
+  done
+  [ -n "$run" ] || return 1
+  n=0
   while [ $n -lt $((tmo*2)) ]; do
-    [ -f "$repo/.rddev/workers/$task/exit.status" ] && return 0
+    exits="$(fg_record_query "$repo" "$task" "$run" || true)"
+    if [ -n "$exits" ] && [ "$exits" != "-" ]; then return 0; fi
     sleep 0.5
     n=$((n+1))
   done
   return 1
+}
+
+# fg_assert_reaper_stopped REPO TASK LABEL — the recorded session leader (the
+# reaper) must not be running any more. The run is over once the reaper has
+# stopped: it writes exit.status, then collects the Worker's process group, then
+# exits, so a waiter that returns with this process alive has returned before
+# the run was over (#207). A zombie counts as stopped — it is finished, just
+# unreaped. Reads /proc directly: no dependency beyond python3.
+fg_assert_reaper_stopped() {
+  local repo="$1" task="$2" label="$3" pid state
+  pid="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("session_leader_pid") or 0)
+except Exception:
+    print(0)' "$repo/.rddev/workers/$task/registry.json")" || pid=0
+  if [ "$pid" = "0" ]; then
+    fg_fail "$label: the registry names no session leader to judge"
+    return
+  fi
+  state="$(python3 -c '
+import sys
+try:
+    stat = open("/proc/%s/stat" % sys.argv[1]).read()
+except OSError:
+    print("gone"); raise SystemExit
+print(stat.rsplit(")", 1)[1].split()[0])' "$pid")" || state=gone
+  case "$state" in
+    gone|Z) fg_ok "$label" ;;
+    *) fg_fail "$label: the reaper (pid $pid) is still running (state $state) while the run reads finished" ;;
+  esac
 }
 
 # fg_run REPO ARGS... — run rddev with cwd=REPO; captures combined output into
