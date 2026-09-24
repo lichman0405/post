@@ -22,6 +22,19 @@
 #     keys off command position. (A newline reaches the tokenizer as a
 #     newline: the command text is JSON-decoded, never text-scanned — see
 #     json_string below for what a scan did to the `\n` escape);
+#   - text that is only being WRITTEN into a file counts as command position on
+#     the same terms as text that is about to run. A heredoc body and the inside
+#     of a quoted string that spans several lines are read line by line like any
+#     other line of the command, so a verb on its own line inside one is refused
+#     exactly as it is on the command line (measured: `cat <<'EOF'` + newline +
+#     `git push origin main` + newline + `EOF` exits 2 — and so does the same
+#     two-line script inside `sh -c '...'`; a heredoc whose body names no verb
+#     exits 0). That is not a defect to be repaired by a parser that skips the
+#     body: this hook decides on the command TEXT and never runs the shell, so
+#     it cannot tell "this line will be executed" from "this line will be
+#     written into a file" — and for a heredoc the two really are the same
+#     thing (the Known limits bullet below records the measurements, and why
+#     the exemption that would buy back the comments is an escape);
 #   - gh/glab/tea CLIs and privilege escalation (sudo/su/doas/pkexec) are
 #     blocked entirely;
 #   - Docker socket access is blocked except `docker --version` /
@@ -48,15 +61,73 @@
 # Known limits (by design — this hook is defence in depth, not the only line):
 #   - The tokenizer splits mode_args on spaces, so a quoted argument containing
 #     a forbidden word in command position can over-block (safe direction).
-#     `sh -c '...'` and friends are deliberately treated as opaque (the shell
-#     inside would escape the analysis) and are confined by the deny layer +
-#     collect-time invariants instead.
+#     `sh -c '...'` and friends are opaque, but only for as long as the quoted
+#     script stays on ONE line: command_records keeps a quoted string intact
+#     within a line and resets its quote state at the start of the next, so
+#     `sh -c 'git push origin main'` is a single word and no rule reads it
+#     (measured: exit 0), while the same script written across lines is read
+#     line by line and refused — `sh -c '` + newline + `git push origin main`
+#     + newline + `'` exits 2 ("git push is a Git control-plane operation").
+#     The cause is that reset, not an unterminated quote: quote state does not
+#     survive the newline, so line 2 opens at command position and its first
+#     word is the command the rule reads. (Measured without the wrapper too:
+#     `echo '` + newline + `git push origin main'` exits 2 even though the verb
+#     sits between two quote marks — an "the quote stays open until the last
+#     line" reading puts it in an ARGUMENT and predicts exit 0, the opposite of
+#     what happens, and `echo 'git push origin main'` on one line is that 0.
+#     Only the line's FIRST word is the command, so the same body preceded by
+#     `x ` exits 0.)
+#     Nothing in this hook holds the one-line form; the layers that do are
+#     outside it, and neither is precise. The deny list spawn writes into
+#     worker-settings.json (denyRules(): Bash(git commit:*), Bash(git push:*),
+#     Bash(git worktree:*), Bash(gh:*), Bash(sudo:*), ...) is a list of
+#     COMMANDS, so it pre-empts a call that begins with one of them, not a
+#     shell that was handed one as a string; and the collect-time invariants
+#     (worker_collect.go: HEAD must equal the recorded baseline and
+#     refs/heads/<task> must still point at it) judge the refs a command moved,
+#     which is where an operation performed through a wrapper this hook never
+#     read has to surface. The credential half is handled where credentials
+#     live: spawn strips the credential variables out of the Worker's
+#     environment (the printenv rule below says the same) and points
+#     GH_CONFIG_DIR at an empty directory, so a credential helper that defers
+#     to `gh auth git-credential` has no token store left to read.
 #   - Command-position analysis reads the command TEXT. It does not run the
 #     shell: `$var`, `${var}` and `$(...)` are not expanded, so a verb that is
 #     only spelled out by an expansion (`c=cp; $c x /etc/y`) is not matched,
 #     and neither is a command a script or a downloaded file runs. `$` in a
 #     *path* is handled on the write side, where an unresolvable expansion
 #     fails closed.
+#   - Heredoc bodies and multi-line quoted strings are NOT exempted from
+#     command-position analysis (T1223), although much of the text in them is
+#     prose that never runs. The exemption is not available, because a heredoc
+#     body can run without there being any separate command to catch it:
+#       (i) under an UNQUOTED delimiter the body is expanded while the command
+#           is being prepared, so a `$(...)` in it runs before and without the
+#           consumer. Measured: `{ printf 'consumer-start\n' >> log; } <<EOF`
+#           + `$(printf 'expansion-ran\n' >> log)` + `EOF` writes
+#           `expansion-ran` BEFORE `consumer-start`, and a body attached to a
+#           command that does not exist at all (`/definitely/not/a/command
+#           <<EOF`) still runs — exit 127, side effect already on disk;
+#      (ii) `cat <<'EOF' | sh` hands the body to a shell, which runs it as
+#           commands: with the delimiter quoted (so the OUTER shell expands
+#           nothing) the inner `echo ... > marker` still lands on disk. A body
+#           line IS a command line whenever its consumer is a shell.
+#     A parser that skipped the body would therefore trade an over-block (the
+#     safe direction) for a way out of the envelope — and the over-block is not
+#     even the common case. Both counts below use the same selector: a command
+#     in which EVERY guard-named word sits inside a heredoc body or an unclosed
+#     quote. Over this repo's recorded Worker transcripts (.rddev/workers/*/
+#     worker.log plus worker-run-*.log; 54129 distinct Bash commands, T1223)
+#     that selector picks 23 commands, and the JSON-decode fix newly refuses 4
+#     of them — all four bodies that really run (two `python3 - <<'PY'`, one
+#     `cat > /tmp/...sh <<'EOF'` written and then `bash`ed in the same call, one
+#     multi-line `bash -c '...'` carrying `rm -rf` and `ln -s`); not one is a
+#     body that is only ever written. The same selector over a wider corpus —
+#     every recorded session, the Supervisor's own included, tabulated in
+#     tasks/decisions.md decision 63 (116,323 Bash calls there, 23,281 of them
+#     multi-line) — picks 178 and newly refuses 30, of the same composition;
+#     that table's Worker-sessions-only row (78,138 Bash calls) is 45 picked
+#     and 4 refused — this pass's four, of the same composition.
 #   - The read side is enforced for the file-path TOOLS (Read/Grep/Glob/
 #     NotebookRead, plus the file writers, which read what they change), not
 #     for shell commands: `cat <credential store>` is not inspected here. That
@@ -85,8 +156,19 @@
 # is exactly the fail-open this file exists to close. (Measured: refusing the
 # shape-mismatched field breaks no real call. Over this repo's 54031 recorded
 # tool_use calls the fields read here are strings or absent every time.)
-# Only an *unknown tool name* exits 0 — no path or command policy applies to
-# it, and refusing it would break the Worker contract with a false positive.
+# Which calls are judged at all: the branches above are Bash, the four
+# file-reading tools (Read/Grep/Glob/NotebookRead) and the four file-writing
+# tools (Write/Edit/MultiEdit/NotebookEdit). A tool name that is none of those
+# exits 0 — an unknown name has no path or command policy to apply, and neither
+# does a known tool that names neither (Task, TodoWrite, …) — and so does a
+# call whose tool name is absent or null, which leaves no branch to choose. A
+# file-path tool whose tool_input names NO path field also exits 0, because
+# those branches act on the paths that are there. Measured (T1223): `Read` with
+# tool_input `{}` exits 0, `Write` carrying only `content` exits 0, a null
+# tool_name exits 0, an absent one exits 0. The Bash branch is the one that
+# refuses an ABSENCE — a Bash call whose `command` is absent, null or empty is
+# the violation, not a call with nothing to check (exit 2, see the paragraph
+# above).
 #
 # Environment (all set by rddev worker spawn):
 #   POST_REPO_ROOT         absolute repo root (main checkout)
@@ -616,9 +698,31 @@ case "$tool_name" in
 
 		# 2) command-position analysis. The records go through a temp file
 		# rather than a pipeline: a `while read | cmd` loop would run in a
-		# subshell and a block() there would be lost.
+		# subshell and a block() there would be lost. The temp file is kept
+		# rather than replaced by a here-document fed to the same loop, because
+		# the records carry model-controlled command text: a delimiter the text
+		# happens to contain truncates the loop SILENTLY, which is an
+		# under-block, and the unblocking direction is the one this file's
+		# doctrine says must never be taken by accident.
+		#
+		# A records file that cannot be created used to `exit 0`, and that let
+		# through the whole of command-position analysis — everything the loop
+		# below does is the analysis. Measured with TMPDIR=/nonexistent-dir
+		# (this hook's own environment: a Worker cannot change it from a command
+		# prefix, which is a subshell and cannot reach the parent, so this is
+		# robustness rather than a live bypass): `rm -f /etc/hosts`,
+		# `cp a /etc/b`, `sudo ls`, `gh pr list`, `git push origin main` and
+		# `printenv GH_TOKEN` all exited 0 — the shell-write verbs, the
+		# privilege-escalation binaries, the control-plane CLIs, git and the
+		# credential probes switched off together by a broken TMPDIR. Only the
+		# two rules that do not need the file survived it: the redirection check
+		# (`echo hi > /etc/x`, exit 2) and the file-writing tools
+		# (`Write /etc/x`, exit 2). The trace was one `mktemp: failed to create
+		# file via template` line on stderr, which the consumer ignores. An
+		# instrumentation failure that silently disables the strongest rules is
+		# the shape this file exists to refuse, so it refuses here too.
 		records=$(command_records "$command")
-		records_file=$(mktemp "${TMPDIR:-/tmp}/worker-guard.XXXXXX") || exit 0
+		records_file=$(mktemp "${TMPDIR:-/tmp}/worker-guard.XXXXXX") || block "cannot create the records file for command-position analysis under TMPDIR='${TMPDIR:-/tmp}' (mktemp failed); refusing the call rather than running a shell command with every command-position rule switched off."
 		trap 'rm -f "$records_file"' EXIT HUP INT TERM
 		printf '%s\n' "$records" > "$records_file"
 		mode=""

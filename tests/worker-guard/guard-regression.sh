@@ -596,6 +596,68 @@ check "shell read of a credential store is not inspected"      allow "" Bash com
 check "shell read of the harness runtime state is not inspected" allow "" Bash command 'cat /repo/.rddev/runtime/tasks/T0010/gate-inputs.json'
 
 # ---------------------------------------------------------------------------
+# Text that is only being WRITTEN is read as command position too (T1223).
+#
+# A heredoc body and the inside of a quoted string that spans several lines
+# reach the tokenizer as ordinary lines of the command — the guard decides on
+# the command TEXT, it never runs the shell, so it cannot separate a line that
+# will be executed from a line that will be written into a file. The guard's
+# header says so in those words now; before T1223 it said the opposite for
+# heredocs (nothing) and too little for `sh -c` (that the quoted script is
+# opaque, full stop — true only while it stays on one line).
+#
+# Both directions, for the reason every other rule here has both: the refusal
+# must not be "a heredoc is refused". The benign rows below are the ones that
+# would fail if a future change made the body a blanket refusal.
+her_nl=$'\n'
+
+check "heredoc body line naming a git verb is refused" block "control-plane" \
+	Bash command "cat <<'EOF'${her_nl}release notes draft${her_nl}git push origin main${her_nl}EOF"
+check "heredoc body line naming a shell write verb is refused" block "confined" \
+	Bash command "cat <<EOF${her_nl}release notes draft${her_nl}rm -rf /etc/evil${her_nl}EOF"
+# The mechanism the exemption would have to survive: a body whose consumer is a
+# shell is a list of commands, so refusing to read it is refusing to read the
+# commands the call goes on to run (measurements in the guard's header).
+check "heredoc body fed to a shell is read as commands" block "control-plane" \
+	Bash command "cat <<'EOF' | sh${her_nl}git push origin main${her_nl}EOF"
+check "benign heredoc body is allowed" allow "" \
+	Bash command "cat <<EOF${her_nl}release notes draft${her_nl}remember to update the docs${her_nl}EOF"
+check "benign heredoc body piped into a shell is allowed" allow "" \
+	Bash command "cat <<EOF | sh${her_nl}echo notes drafted${her_nl}EOF"
+
+# `sh -c '...'` — the one-line form is the documented opaque case, the
+# multi-line form is not. Both spellings have to be pinned: a guard that
+# refused the one-line form too would be over-blocking, and one that allowed
+# the multi-line form would be the T1221 hole wearing a quote.
+check "multi-line sh -c is read line by line (git refused)" block "control-plane" \
+	Bash command "sh -c '${her_nl}git push origin main${her_nl}'"
+check "multi-line sh -c with a benign script is allowed" allow "" \
+	Bash command "sh -c '${her_nl}echo hello${her_nl}ls -la${her_nl}'"
+# ...and the single-line limit itself, stated as a case rather than left in
+# prose: this hook does NOT read it. What holds it is outside this script (the
+# spawn-written deny list, the collect-time HEAD/ref invariants, and a Worker
+# environment with no git credentials); the guard's header names them.
+check "single-line sh -c is opaque (documented one-line limit)" allow "" \
+	Bash command "sh -c 'git push origin main'"
+
+# ---------------------------------------------------------------------------
+# The records file is load-bearing: it carries the parsed command positions
+# that every rule below the redirection check reads. Creating it used to be a
+# `|| exit 0`, so a broken TMPDIR let the whole of command-position analysis
+# through while the call looked handled — measured before the fix: with
+# TMPDIR=/nonexistent-dir, `rm -f /etc/hosts`, `cp a /etc/b`, `sudo ls`,
+# `gh pr list`, `git push origin main` and `printenv GH_TOKEN` each exited 0,
+# and only the two rules that need no file survived (`echo hi > /etc/x` and
+# `Write /etc/x`, both exit 2). The first case below is therefore red against
+# the unfixed arm by construction; the second is its other side — the refusal
+# belongs to the branch that needs the file, not to the whole hook.
+
+check "no records file: the Bash branch fails closed" block "cannot create the records file" \
+	Bash command 'rm -f /etc/hosts' TMPDIR=/nonexistent-dir
+check "no records file: a file-tool call is unaffected" allow "" \
+	Read file_path '/repo/README.md' TMPDIR=/nonexistent-dir
+
+# ---------------------------------------------------------------------------
 
 if [ "$fail" -gt 0 ]; then
 	printf 'guard-regression: %d/%d PASS, %d FAILED\n' "$pass" "$((pass + fail))" "$fail" >&2

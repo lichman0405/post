@@ -87,9 +87,25 @@ func TestGuardRegressionSuiteRunsWhereCIRunsIt(t *testing.T) {
 	// unknown-tool-name counter-case (1) and the two shell-read cases that
 	// pin the limit the contract sentence states (2). A floor set below the
 	// count a task lands with would let that task's cases be deleted again.
-	const floor = 365
+	//
+	// 375 is what T1223 raises it to: +10, and every one of them is a case the
+	// "text that is only written is not read" mistake needed. Five for the
+	// heredoc body — a body line naming a git verb (block), one naming a shell
+	// write verb under an unquoted delimiter (block), a body whose consumer is
+	// a pipe into `sh` (block), and the two benign bodies that stop the
+	// refusal from quietly becoming "a heredoc is refused" (allow, with and
+	// without the pipe). Three for `sh -c`, which is opaque on one line only:
+	// the multi-line script carrying a verb (block), the multi-line script
+	// carrying none (allow), and the single-line spelling (allow) — the
+	// documented limit pinned as a case rather than left in prose, so a future
+	// change that closes it has to delete a case and raise this number. Two for
+	// the records file, whose creation used to be a `|| exit 0` that switched
+	// every command-position rule off: a Bash call whose TMPDIR cannot produce
+	// it is refused, and a file-tool call under the same broken TMPDIR is still
+	// allowed, so the refusal is visibly the branch's and not the hook's.
+	const floor = 375
 	if total < floor {
-		t.Fatalf("the suite ran %d cases, below the %d it carried when T1221 closed the newline hole in command-position analysis — cases were removed or made unreachable:\n%s", total, floor, got)
+		t.Fatalf("the suite ran %d cases, below the %d this suite carries (raised to it by T1223, which added the heredoc / multi-line `sh -c` / records-file cases; T1221 had raised 188 to 365) — cases were removed or made unreachable:\n%s", total, floor, got)
 	}
 	t.Logf("guard regression suite: %d/%d PASS against the embedded guard", pass, total)
 }
