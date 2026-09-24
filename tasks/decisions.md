@@ -18788,3 +18788,72 @@ AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed,
   T1214 在改完 §4 第 1 条之后，草稿与账本已再次相等。
 - 这一笔**没有**改 `tasks/packages/T1214.json`（它现在与 DAG 一致了），也**没有**动
   `tests/acceptance/**`（证书与校验器的字节数不变）。
+
+---
+
+## ㊾ T1216 被拒的是我写的**条件式验收标准**：判据的真假不该取决于交付物的形状（L1，2026-09-24）
+
+### 一、发生了什么
+
+T1216 的 Worker 把仪器拆成了三步、每步各打返回码与响应体，实测 120 次运行、
+自己实现了有界重试**再实测 32 次发现挽回 0 次**因而去掉而不是硬留，另外两条候选修法也实测量过
+后否掉，剩下的洞按任务书的「停手点名」写进 `follow_up_issues`。collect 的 20 项检查里 19 项绿，
+**唯一红的是一行**：
+
+```
+[FAIL] result-consistency: result-acceptance: status completed but acceptance entries not passed:
+  If the fix contains a retry: … — supply that exhaustion-red run's output. (not_applicable)
+```
+
+那一条的原文是我在任务书里写的：「**修法若含重试**：次数与间隔是**写死的常量**、每次尝试都打印、
+用尽后**必须红**且点名是哪一步——给出「用尽即红」那一次的输出。」
+
+### 二、为什么它必然被拒：三处对不齐
+
+- 收工校验的规则是**无条件**的（`internal/devorchestrator/result_consistency.go:159-166`）：
+  `status: completed` 下任何一条 acceptance 只要 `!= "passed"` 就 fail。
+- 而 `specs/orchestrator/worker-result.schema.json` 的 `acceptance[].status` 枚举是
+  `["passed", "failed", "not_applicable"]`——**`not_applicable` 是 schema 承认的合法值**。
+- 给 Worker 的 `system.md` 里那句「the vocabulary has no "not applicable"」写在 **`tests[]`**
+  那一条里（讲的是 `not_run`）；对 `acceptance[]` 一个字都没说。
+
+于是：schema 允许、collect 拒收、正文没说。**Worker 是照 schema 写的，它没记错。**
+
+### 三、我的错在哪：条件的落点
+
+**判据的真假不该取决于交付物「长什么样」。** 「若含重试 ⇒ …」在「不含重试」那一支没有对象，
+于是它没有可填的真值——不是 Worker 不肯填，是这条判据在那个分支上**不存在**。
+
+条件式本身不是错，错的是**条件落在哪**。我把全部 `acceptance_criteria` 扫了一遍
+（含「若/如果」的 **22** 条）：其余各条的条件都落在**工人要报告的结论**上
+（「如果走不通，那是真实缺陷，把它写进 RESULT」），那种写法恒可满足，是对的；
+只有 T1216 这条的条件落在**交付物的形状**上。已合并的 T0805[9]
+（「反向组合…若你的实现会拒，也一并钉住」）是较弱的一例，不再派工。
+
+### 四、这一笔做了什么
+
+1. 改任务书：`tasks/tasks.json` 的 `.tasks[157].acceptance_criteria[3]` 改成**无条件**形式——
+   两支都必须交代、都必须有实测支撑；不含重试就要给出实测数据与去掉它的理由；
+   并明写「任何一支都不允许留空或写「不适用」」。写入前用递归 walk 断言
+   **只有 `.tasks[157].acceptance_criteria[3]` 变化**，DAG 其余部分逐字未动。
+2. **改完更严不更松**：旧文本在「没有重试」那一支**什么都不要求**；新文本要求给出
+   实测数据与去掉它的理由。这不是为了让 Gate 变绿而放宽判据。
+3. `rddev worker rework T1216 --reason-file`（同 session、diff 保留、`--resume`），
+   返工信里点名「**代码一个字都不许动**，这一轮的改动只在 `RESULT.json`」。
+4. 已验证送达：新条目在 `.rddev/workers/T1216/prompt.md:37`（`## Acceptance criteria` 节内），
+   旧原话**只作为引文**出现在 `:116`（返工信节内），diff 仍是那一个文件 139/5。
+
+### 五、留下的那一半**没动**，是故意的
+
+schema / collect / `system.md` 三者对 `acceptance[].status = not_applicable` 的不一致，
+**这一笔不修**。理由：它是在我自己被这笔活卡住的当口发现的，顺手放宽一条判据
+正是 CLAUDE.md §5.1 禁止的那种动作。该让 collect 认这个值，还是该把枚举里的它删掉
+并把规矩写进 `system.md`，**要当作 P13 的一笔正经活单独判**。
+
+### 六、可复核的数
+
+- collect 报告 20 项、红 1 项：`.rddev/workers/T1216/collect-report.json`
+- Worker 的实测：120 次运行 / 12 红；最终构建 20 次顺序**全绿**，8 路并发下 12 次里 **2 红**，
+  两次红都是 `2/3 seed=404`（**不是**任务书猜的 403）；重试 32 次挽回 **0** 次，
+  每次 4 次尝试约 3.1 秒耗尽
+- 全部 `acceptance_criteria` 里含条件式词 **22** 条，条件落在**交付物形状**上的 **1** 条（本条的旧写法）

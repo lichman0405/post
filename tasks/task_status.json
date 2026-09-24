@@ -12104,10 +12104,10 @@
       ]
     },
     "T1216": {
-      "status": "rejected",
-      "started_at": "2026-09-24T01:03:34Z",
+      "status": "running",
+      "started_at": "2026-09-24T01:57:37Z",
       "notes": "新立账（2026-09-24，与 T1215 同批）：#240——G3 的 `gitea-real-services` 偶发红在 bootstrap 那三步上（`tests/acceptance/gitea-real-services-e2e.sh:529-531` 三个请求串在一条 `&&` 链里，`:534` 的失败话术说不出是哪一步、什么码），量到的频率约 5 次红 1 次（原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`）。任务书见 `tasks/packages/T1216.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`gitea-real-services`，该作业没有 `requires_tasks`，故 `dependencies` 为空）。`v1_required=false`：这是流水线加固，不是产品交付。",
-      "worker_run_id": "run-1936a2c60ae82bff",
+      "worker_run_id": "run-68e8c5494365fa65",
       "rejection_reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: If the fix contains a retry: attempts and interval are hard-coded constants, every attempt is printed, and exhaustion MUST go red naming the step — supply that exhaustion-red run's output. (not_applicable)",
       "history": [
         {
@@ -12129,6 +12129,13 @@
           "at": "2026-09-24T01:54:18Z",
           "run_id": "run-2ca76eb89f7fc35d",
           "reason": "collect rejected: result-consistency: result-acceptance: status completed but acceptance entries not passed: If the fix contains a retry: attempts and interval are hard-coded constants, every attempt is printed, and exhaustion MUST go red naming the step — supply that exhaustion-red run's output. (not_applicable)"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-24T01:57:37Z",
+          "run_id": "run-68e8c5494365fa65",
+          "reason": "worker spawn"
         }
       ]
     }
