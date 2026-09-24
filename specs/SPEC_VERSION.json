@@ -1,11 +1,11 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "9340b9e7864d356d92643b5147cd21217e692481b6f4949545059db4ad4dc318",
+  "combined_digest": "868d6f01f2bbf875b084244fc4fc236b58545478b7e7df99b4f81f2966df971c",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi-exemptions.yaml": "545ac92bc8476313240259b1ccd6d11c5c018fa33129473fc1d5c4d0d0b1be70",
     "specs/api/openapi.yaml": "2a17418431163861934ce0425ebaf70915a3c47bdb109f13dc898b761446d69d",
-    "specs/database/postgres.sql": "49250e34e96be4e9a2f1ac7a306c022ebbca86624dcc957b28c3c3b2a0994b32",
+    "specs/database/postgres.sql": "2f002f0ead318632e25170026bb156ff9740e245b3e13ac96bc06ec137b4804a",
     "specs/events/event-types.yaml": "5987d653a176348dd86cb6563578de8095e9f8390cca72b332f51dac5edf954c",
     "specs/mcp/tools.json": "2657a1747f00b71aa91c97c2cd0cbdea3fdaa2a3d2ab0589867302002504b60a",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
@@ -44,5 +44,5 @@
   },
   "input_count": 39,
   "marker_format": 1,
-  "spec_version": "sha256:9340b9e7864d356d"
+  "spec_version": "sha256:868d6f01f2bbf875"
 }
