@@ -399,23 +399,31 @@ func TestRenderSystemPromptContainsContract(t *testing.T) {
 		"No Git control-plane", "allowed_scope", "Never weaken",
 		"/repo/.rddev/workers/T0001/RESULT.json",
 		"EARLY", "not accepted",
-		// The three recording conventions a RESULT gets rejected for getting
+		// The FOUR recording conventions a RESULT gets rejected for getting
 		// wrong, and that nothing else in the package states: a deliberate
 		// break-and-revert is a `passed` entry (T0709 lost an attempt to
 		// recording one as `failed`, which contradicts a completed status);
 		// a pre-existing failure is `blocked`, never hidden or worked
 		// around (T0601 recorded one honestly as `failed` and was rejected
-		// for the contradiction rather than for the report); and an
-		// unexecuted command is not a `tests[]` entry at all under
-		// `completed` (T0707 and T0806 were each sent back for listing one,
-		// both times with the reasoning right and the field wrong — the
-		// rulebook said "anything not executed is not_run with a reason",
-		// which the consistency check refuses outright).
+		// for the contradiction rather than for the report); an unexecuted
+		// command is not a `tests[]` entry at all under `completed` (T0707
+		// and T0806 were each sent back for listing one, both times with the
+		// reasoning right and the field wrong — the rulebook said "anything
+		// not executed is not_run with a reason", which the consistency check
+		// refuses outright); and `acceptance[]` follows the SAME rule the
+		// schema does not state — `not_applicable` is in the enum and is
+		// still refused under `completed` (T1216 was rejected whole for it,
+		// having followed the schema).
 		// The third one is asserted by its distinctive phrases, not by the
 		// token `not_run`: that word appears three times in the rendered
 		// prompt, so a Contains on it stays green while the rule is deleted
 		// (measured — the first version of this assertion survived exactly
 		// that mutation).
+		// The count word is not asserted here:
+		// TestTheConventionsListStatesHowManyConventionsItHas owns it,
+		// together with the fourth convention's phrases, and a Contains list
+		// is exactly what that mutation (delete the bullet, fix the word)
+		// slips past.
 		"MUTATION CHECK", "predates your change", "blocked",
 		"lists the commands you RAN", "has no place under", "notes_for_supervisor",
 	} {
@@ -423,4 +431,115 @@ func TestRenderSystemPromptContainsContract(t *testing.T) {
 			t.Errorf("system prompt missing %q", want)
 		}
 	}
+}
+
+// TestTheConventionsListStatesHowManyConventionsItHas: the recording
+// conventions are a numbered claim, so the number is part of the contract. A
+// heading that says "Three" above four bullets is the shape this test exists
+// for: the Worker reads the count, and a list that grew without its heading
+// is how "there are four rules here" stops being true — the fourth rule then
+// reads as an aside to the third, which is exactly the reading that cost
+// T1216 an attempt (a `not_applicable` acceptance entry, legal in the schema,
+// refused by a collection rule no line of this text stated).
+//
+// The count is checked against the BULLETS, not against a hardcoded word, so
+// it holds whichever way the order or the wording changes, and it is checked
+// together with the fourth convention's phrases: a test that only counted
+// would pass on a list that lost the rule and kept the arithmetic.
+func TestTheConventionsListStatesHowManyConventionsItHas(t *testing.T) {
+	s := RenderSystemPrompt("T0001", "/repo", "/repo/.rddev/worktrees/T0001", "/repo/.rddev/workers/T0001", "/repo/.rddev/worktrees")
+	word, heading, block, bullets := conventionsList(t, s)
+
+	numbers := map[string]int{"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+	want, ok := numbers[strings.ToLower(word)]
+	if !ok {
+		t.Fatalf("the conventions heading starts with %q, which is not a count word:\n%s", word, heading)
+	}
+	if len(bullets) != want {
+		t.Errorf("the heading says %q (%d) and the list carries %d convention(s): the number and the rules it numbers have drifted apart\nheading: %s\nbullets: %v",
+			word, want, len(bullets), heading, bullets)
+	}
+
+	// The fourth convention, asserted by phrases that appear in the rendered
+	// system prompt NOWHERE else (it is built from no task package, so these
+	// strings come only from this list): delete the rule and every one of them
+	// disappears. `not_applicable` is the one that matters — the collection
+	// rule is narrower than the schema's enum, and that gap is what the Worker
+	// could not read anywhere in its package.
+	for _, want := range []string{
+		"`not_applicable`",
+		"`acceptance[]`",
+		"narrower than the schema",
+		"rejects the whole run",
+		"`notes_for_supervisor`",
+		"belong to a `blocked` or `failed` report",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the conventions list does not state the acceptance[] completion rule (%q missing): a Worker that follows the schema and writes `not_applicable` under `completed` is rejected with nothing in its contract having said so\nlist:\n%s", want, block)
+		}
+	}
+
+	// ORDER, because the prompt refers to the conventions by position: the
+	// paragraph above the list says "the third recording convention below
+	// decides where a command you could NOT run belongs". Inserting the new
+	// rule anywhere but last would silently repoint that reference at the
+	// acceptance[] rule — a sentence in the Worker's contract that sends it to
+	// the wrong paragraph. (The task package says the fourth convention must be
+	// parallel to the tests[] one, not that it must be fourth; the position is
+	// what the surrounding text already assumed, and pinning it here is what
+	// keeps the reference honest.)
+	if len(bullets) >= 3 && !strings.Contains(bullets[2], "`tests[]` lists the commands you RAN") {
+		t.Errorf("the third convention is %q, but the prompt above the list calls the third one the rule that says where an unrun command belongs — the cross-reference no longer points at the tests[] rule\nbullets: %v", bullets[2], bullets)
+	}
+	if len(bullets) >= 4 && !strings.Contains(bullets[3], "`not_applicable` in `acceptance[]`") {
+		t.Errorf("the fourth convention is %q, want the acceptance[] completion rule\nbullets: %v", bullets[3], bullets)
+	}
+}
+
+// conventionsList returns the count word of the "recording conventions"
+// heading, the heading itself, every line of the list that follows it, and the
+// top-level bullets among those lines.
+//
+// Parsing the rendered text rather than a constant is the point: the assertion
+// has to be about what the Worker receives.
+func conventionsList(t *testing.T, prompt string) (word, heading, block string, bullets []string) {
+	t.Helper()
+	lines := strings.Split(prompt, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "recording conventions") {
+			start, heading = i, ln
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("the rendered system prompt has no recording-conventions heading:\n%s", prompt)
+	}
+	fields := strings.Fields(heading)
+	if len(fields) == 0 {
+		t.Fatalf("the conventions heading is empty")
+	}
+	word = fields[0]
+	// The heading itself wraps over several lines; skip to the blank line that
+	// ends it before reading the list.
+	i := start + 1
+	for i < len(lines) && strings.TrimSpace(lines[i]) != "" {
+		i++
+	}
+	list := []string{}
+	for ; i < len(lines); i++ {
+		ln := lines[i]
+		switch {
+		case strings.HasPrefix(ln, "- "):
+			bullets = append(bullets, ln)
+			list = append(list, ln)
+		case strings.TrimSpace(ln) == "", strings.HasPrefix(ln, " "):
+			// blank separators and the wrapped continuation lines of a bullet
+			list = append(list, ln)
+		default:
+			// the paragraph after the list: the list is over
+			return word, heading, strings.Join(list, "\n"), bullets
+		}
+	}
+	return word, heading, strings.Join(list, "\n"), bullets
 }

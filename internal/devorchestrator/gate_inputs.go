@@ -62,6 +62,26 @@ type GateInputs struct {
 	// review-spawn time; review collect rejects a verdict produced against
 	// different code (or a review Worker that wrote into the task worktree).
 	ReviewDiffSHA string `json:"review_diff_sha,omitempty"`
+	// DispatchedAt and ResultSHAAtSpawn are what let collect say WHICH attempt
+	// a RESULT.json belongs to (#264). A re-dispatch — rework or respawn —
+	// reuses the task's result dir and the same file name, so a Worker that
+	// never rewrote its RESULT.json used to hand the previous attempt's
+	// document to the judge as this round's, green. Both values are stamped by
+	// the pre-process write of this record, i.e. before the Worker exists, so
+	// every document this attempt can write is newer than DispatchedAt; and
+	// since that instant precedes StartedAt (which spawn records only after
+	// the process exists), it carries no window in which a legitimate write
+	// could be older than the run it belongs to.
+	//
+	// DispatchedAt is rendered at nanosecond precision for the reason
+	// runStartedAtFrom documents: two attempts share a second on any machine
+	// fast enough to run the e2e, and a second-granularity start cannot order
+	// a file written within it. ResultSHAAtSpawn is the digest of the
+	// RESULT.json ALREADY in the result dir at that instant ("" when there was
+	// none) — the instrument that still sees the previous attempt's document
+	// when something has refreshed its mtime.
+	DispatchedAt     string `json:"dispatched_at,omitempty"`
+	ResultSHAAtSpawn string `json:"result_sha_at_spawn,omitempty"`
 }
 
 // gateInputsPath returns the authoritative record path for one task.
@@ -89,11 +109,25 @@ var authoritativeGuardFiles = []string{
 // record (a missing record means a pre-T0012 spawn, handled as a degraded
 // warning, never as a silent judgement on Worker-writable copies).
 // taskDir is the per-task runtime dir (.rddev/workers/<TASK>).
+//
+// The two fields this function stamps itself — DispatchedAt and
+// ResultSHAAtSpawn — are readings taken HERE rather than passed in, because
+// what they have to be is facts about the instant of dispatch: a caller that
+// could supply either could supply one that attributes another attempt's
+// document to this run. This is the first write of the record and it runs
+// before the process exists, which is exactly the property collect's
+// freshness judgement rests on (see result_freshness.go).
 func WriteGateInputs(repoRoot, taskID string, inputs *GateInputs, taskDir string) error {
 	dir := RuntimeTasksDir(repoRoot, taskID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	inputs.DispatchedAt = runStartedAt()
+	digest, err := resultDigestAt(taskDir)
+	if err != nil {
+		return err
+	}
+	inputs.ResultSHAAtSpawn = digest
 	data := marshalIndentBytes(inputs)
 	if err := writeFileAtomic(gateInputsPath(repoRoot, taskID), data); err != nil {
 		return fmt.Errorf("writing authoritative gate inputs: %w", err)

@@ -291,10 +291,31 @@ func Collect(opts *CollectOpts) (*CollectReport, error) {
 		pass("scope", fmt.Sprintf("%d changed path(s), all inside allowed_scope (derived-artifact allowance applied)", len(changed)))
 	}
 
-	// 7) RESULT.json validates against worker-result.schema.json — the
-	// mechanical enforcement the prose-only contract lacked (T0010 delivered
-	// tests[].output and acceptance[] strings and was rejected).
+	// 7) RESULT.json belongs to THIS attempt (#264), then validates against
+	// worker-result.schema.json — the mechanical enforcement the prose-only
+	// contract lacked (T0010 delivered tests[].output and acceptance[] strings
+	// and was rejected).
+	//
+	// Freshness first, because it is the question the schema cannot ask. A
+	// re-dispatch reuses the result dir and the file name (rework resumes the
+	// session and keeps the worktree; respawn resets the worktree only), so a
+	// rework whose Worker never rewrote its RESULT.json handed the previous
+	// attempt's document to the judge — schema-valid, task_id correct, status
+	// completed, and green. Whose document this is has to be judged against
+	// something the Worker does not write; see result_freshness.go for the two
+	// instruments and what each is blind to.
 	resultPath := filepath.Join(rec.ResultDir, "RESULT.json")
+	freshness, err := CheckResultFreshness(resultPath, gate, rec)
+	if err != nil {
+		return report, err
+	}
+	for _, f := range freshness {
+		if f.Refused {
+			fail("result-freshness-"+string(f.Instrument), f.Detail)
+		} else {
+			pass("result-freshness-"+string(f.Instrument), f.Detail)
+		}
+	}
 	schemaPath := filepath.Join(repoRoot, "specs", "orchestrator", "worker-result.schema.json")
 	if err := ValidateWorkerResultFile(schemaPath, resultPath); err != nil {
 		fail("result-schema", err.Error())
