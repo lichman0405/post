@@ -12219,10 +12219,12 @@
       ]
     },
     "T1217": {
-      "status": "running",
+      "status": "merged",
       "started_at": "2026-09-24T04:52:49Z",
       "notes": "新立账（2026-09-24，P13 第二笔）：两件事同一处收工校验。一是 `#264`——`worker_collect.go:297` 收 `RESULT.json` 时全文没有与 `rec.StartedAt` 的比较，而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）重用同一任务目录、`archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径，于是一轮没写过 `RESULT.json` 的返工会被收成绿的。二是 ㊾ 带出的：`result_consistency.go:159-166` 无条件要求 `completed` 下所有 `acceptance[]` 是 `passed`，而 schema 的枚举含 `not_applicable`，`system.md` 却只把这条规矩说给了 `tests[]`——Worker 照 schema 写就被拒，正文里没人告诉它。修法已定：不放宽 collect、不改 schema，把规矩写进正文。`v1_required=false`：这是流水线加固，不是产品交付。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已与 T1215 一起抄进 `dependencies`）。",
       "worker_run_id": "run-cf8bd29409fdc0ac",
+      "accepted_by_supervisor_at": "2026-09-24T05:39:13Z",
+      "merged_at": "2026-09-24T05:51:29Z",
       "rejection_reason": "【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】\n\n你的交付在验收时被拒，`rddev task accept` 的原话是：\n\n    rddev task accept: REFUSED — G2 is red (state unchanged):\n      - G2 (CI's exact jobs) is red in run run-01028d8104c32f83-g2 — see /home/shibo/code/post/.rddev/runtime/gates/T1217/gate-run-run-01028d8104c32f83-g2.json and the step logs\n\n**这次不是「基线旧了」那么简单：验收时 `G2` 的 `security-master` 真的红了**，\n报错行贴在下面。**它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**\n\n基线同时也推到了最新的 main（派生文件已按合并后的树重新生成），所以请先\n确认你看到的是新基线，再动手。\n\n**你要做的事：**\n1. 先跑一遍 `go build ./...`（前端改动则 `pnpm -C apps/web build`），把编译错误清干净。\n2. 自己去**复现下面那条报错**（命令就在上面，逐字跑一遍，别只看结论）。**改的是你的实现，不是断言**：测试是新的，它拦下的东西是真的。\n3. **不要手工编辑 `specs/SPEC_VERSION.json` / `specs/database/postgres.sql`** ——\n   要更新就跑 `python3 scripts/spec_version.py --write` / `python3 scripts/gen_schema_snapshot.py`。\n4. **不要为了让门变绿而删测试、注释断言、放宽断言、跳过用例或放大超时。**\n   编译错误改调用方；断言若在新主线上的确不再成立，**在 RESULT 里写明并给证据**，由 Supervisor 裁定。\n5. 重跑后的真实结果写进 `RESULT.json`——**失败就写失败**。你不是在申请通过，你是在申请验收。\n\n**这一次验收里，实际报错的行（供你定位）：**\n\n  * G2 的 `security-master` 红了\n      命令 `bash tests/security/master-security-gate.sh` 退出码 1：\n        internal/devorchestrator/worker_collect.go:366:17: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/worker_collect.go:325:18: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:123:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/result_freshness.go:87:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:289:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:285:15: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:142:16: G304 (MEDIUM) Potential file inclusion via variable\n        internal/devorchestrator/gate_inputs.go:348:12: G301 (MEDIUM) Expect directory permissions to be 0750 or less\n",
       "history": [
         {
@@ -12278,6 +12280,26 @@
           "at": "2026-09-24T04:52:49Z",
           "run_id": "run-cf8bd29409fdc0ac",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T05:01:43Z",
+          "run_id": "run-de3cba9ff166ad6d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-24T05:39:13Z",
+          "run_id": "run-5a3b795a8bdd8419"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T05:51:29Z",
+          "run_id": "run-6cc42778db9e66ab",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

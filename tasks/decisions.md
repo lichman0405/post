@@ -19430,3 +19430,204 @@ G2 的 `go test ./internal/devorchestrator/` 会执行本轮新增的 `result_fr
 **真正的后果是一条操作纪律**：**工人交的 orchestrator 改动，在 `make rddev` 之前是不生效的。**
 T1215 的与 T1217 的都要等那一步。所以收尾顺序里"重建二进制"不是可选项，是**这两笔修复开始起作用的前提**；
 把它当成"重启前的例行公事"会漏掉它真正的意义。**在此之前，任何"驱动跑得好好的"都只说明它跑的是旧规则。**
+
+## 56 — 我为了 T1217 把 `ops/ci/gosec-baseline.txt` 开进工人允许面，被后台安全评审判为「安全门弱化」（L1 裁定 + 证伪，2026-09-24）
+
+我 push `5c2b981` 之后，一道后台安全评审判它「Overly Permissive Scope Expansion (Security Gate Weakening)」。
+**判得对了一半，而且是重要的那一半的"形状"。** 我把这条认真当作一条真指控来查，不当作噪声。
+
+**我实际改的**（`tasks.json` 里 T1217 那两个字段）：
+
+    allowed_scope:   + ops/ci/gosec-baseline.txt
+    forbidden_scope: "ops/**"  ->  "ops/**（`ops/ci/gosec-baseline.txt` 除外）"
+
+**形状上确实就是攻击要的东西**：给一个工人写安全基线文件的权限，正是"把发现静默掉"的第一步。
+所以我不能只用"我是为了让漂移过审"来答，得证明**这个文件即使被工人全权改写，也弱化不了那一道门**。
+
+### 证伪（`prove-the-instrument-can-say-no`：先证明它能说"不"，再信它）
+
+强制点在 `tests/security/sast_report.py:67`：`KEY_RE = ^[^\t:*]+:[0-9]+:[0-9]+:RULE$`，
+`CLASS` 之外一律进 `problems`；`:248-252` 一旦 `problems` 非空就 **return 1，且在任何 finding 被看之前**——
+**是致命的，不是提醒**。我把七种"把门开大"的写法逐条喂给它的基线解析器（`Baseline.load`）：
+
+| 写法 | 结果 |
+|---|---|
+| 对照：一条合法条目 | **接受 ✓**（探针能分辨，不是一律拒绝） |
+| 目录级 `internal/devorchestrator/**` | 拒绝 ✓ |
+| glob 级 `internal/devorchestrator/*.go:122:12:G301` | 拒绝 ✓ |
+| 规则级 `G304` | 拒绝 ✓ |
+| 整仓 glob `**:122:12:G304` | 拒绝 ✓ |
+| 省略行号 `…gate_inputs.go::-1:G301` | 拒绝 ✓ |
+| 杜撰类别 `accepted-risk` | 拒绝 ✓ |
+| 理由过短（13 字符） | 拒绝 ✓ |
+
+**结论一：类别级、目录级、规则级的豁免在这套机制里写不出来**，而这正是"弱化"最有价值的那一步。
+另外还有一条：**规则级的反方向也堵着**——删条目会让基线覆盖变少、`unbaselined` 变多、**更红**，所以这条路上没有"删掉就好了"。
+
+### 但有一条残留是真的弱，我不遮掩
+
+**逐发现级的压制，机制拦不住。** 工人完全可以在基线里加一条**真的新、且真的攻击者可达**的发现，
+配一段听起来合格的 ≥20 字理由，门就绿了。`sast_report.py` 只检查**形状**（键格式、类别词表、理由长度），
+它**没有能力判断那段理由是不是真话**。这个残留唯一的防线是**有人真的去读那份 diff**——
+也就是 G2 该做的事，而不是机制在做的事。**这是"流程保证"，不是"机制保证"**（[[guarantee-in-a-comment-is-not-a-mechanism]]）。
+
+**我这一轮读了吗？读了。** 11 条是原位改行号且 `category`/`reason` **逐字未动**（复核文字没被改写——这是"不是你写的"的证据），
+只有 2 条是新增，写的是 `result_freshness.go` 里同形态的 `os.ReadFile`（读 `.rddev/` 下 rddev 自己的运行态，路径不由请求决定）。
+**我没有只信工人报的 `0 unbaselined`**，我在它的树上重跑了判据自己那条命令：
+
+    ok   sast-go: gosec v2.29.0: 798 file(s) scanned, 256 finding(s) reported (256 baselined (reviewed), 0 unbaselined)
+
+且**末尾没有** `, N baseline entr(ies) no longer fire` 那半句——那半句挂着，就说明是另加条目而没换掉旧键。
+
+### 裁定与下一次的规矩
+
+**裁定：记账，不推翻、不阻断合并。** 依 `reject-vs-record`：保护**完好**（已证伪），且工人**如实披露**了残留
+（`RESULT.json` 风险 #3 自己写了基线头注释已过期）——**该记的是我这次选择的形状不够好，不是它做错了什么。**
+
+**但形状确实不够好，这是第二次了**（T1215 一次、T1217 一次）。更硬的形状是：
+**行号漂移是 Supervisor 侧的 integration glue，不该开给工人**——工人交完、我 collect 之后自己重对行号，
+`ops/**` 一秒都不用开。这次没这么做，是因为行号要对着**工人的 diff** 才算得出来，而 dispatch 时那个 diff 还不存在。
+**下一次的规矩：先把任务派成"不许碰基线"，等 diff 落地、我算完偏移，再自己提交那半个 diff。**
+代价是收尾多一步手工；换来的是**安全基线永远不会出现在工人的允许面里**。
+（T1217 之后若再无工可派，这条就只是记给未来的；记下来是因为"第二次"已经是个 pattern 了。）
+
+## 57 — 触发陈旧二进制守卫的**是我自己的 rebase**；而它发作时，驱动是「活着、心跳正常、什么都不做」（L1 记账，第 54 条的当场实证之二，2026-09-24）
+
+第 54 条说的是**驱动**的守卫比错 ref；54 的补记给了一个"collect 少跑一条检查"的实例。
+**这一条是同一处洞的第二个实例，但形态更狠，而且是我亲手造出来的。**
+
+### 我是怎么造出它的
+
+T1217 那笔提交要 rebase 到 `3ea25b2`（T1218 的合并）之上，我没有用远程分支，是直接**推进了本地 `main`**。
+而守卫读的正是**本地 `main`**（`91a518e3..main` 扫 `cmd/rddev` + `internal/devorchestrator`）——
+**所以"把本地 main 更新到最新"这个动作本身，就制造了"二进制过期"的条件。**
+T1215 的提交 `60d7dd5` 由此进入守卫的视野，`bin/rddev` 随即被判定为"9a518e3bfe01 建的，而 main 已经变了"。
+
+**这就是第 54 条那句「守卫比的是本地 main，而驱动从不推进它」的另一面**：
+驱动不推进它，**但我推**。**我每 rebase 一次，就可能把整条流水线冻住一次。**
+
+### 它发作时是什么样子（这一段是操作上的要点）
+
+驱动**没有退出**。它在 `12:54:41` 打了一行：
+
+    drive: this driver is running a stale rddev and will act on nothing until it is rebuilt and restarted:
+
+**然后就没有然后了**——不重复、不刷屏、不再输出。而与此同时：
+
+* `rddev status --json` 报 `"driver": "alive"`、`"heartbeat_age": "8s"` —— **心跳照常，进程照常在**；
+* 唯一的信号是**它旁边另一个字段** `driver_stale_binary` 非空；
+* 心跳文件里 `"state": "starting"`，而它已经这样"starting"了将近四小时。
+
+**这是最容易骗过人的一种停**：`alive` 为真、心跳新鲜、日志末尾看着正常，
+**只有把那个单独字段读出来，才知道它一行都没在干**。我去核 T1217 为什么停在 `running` 不动时，
+正是先看到"驱动还活着、心跳 8 秒"，差点往别处找原因。
+
+### 该记的规矩
+
+1. **`make rddev` + 重启驱动，不是"重启前的例行公事"，而是"新规则开始生效"的那一步**（54 补记已写）；
+   这一次补上的是**它的触发者可以是我自己的一次 rebase**，而不仅仅是"PR 合并进了 origin/main"。
+2. **判"驱动在不在干活"，不能只看 `driver: alive` 与 `heartbeat_age`**——必须同时读 `driver_stale_binary` 是否为空。
+   `alive` 只说明进程在，不说明它在行动。
+3. **它本次的表现是对的、值得记的**：它**拒绝用旧规则判新代码**，而且**把修法写在自己的报错里**
+   （"stop the driver, run `make rddev`, then start it again"）。**停下来并说清怎么修，是这种守卫该有的失败方式**——
+   比"照旧跑、只是少跑几条新检查"好得多（那正是 54 补记里那个更隐蔽的实例）。
+
+**处置（已做）**：按它自己给的修法——先停 resolver loop（第二写入者，[[resolver-loop-is-a-second-writer]]），
+再 SIGTERM 驱动、`make rddev`（新二进制 `vcs.revision=5c2b981`、`vcs.modified=false`）、重启驱动。
+**重启后 3 秒内它就把 T1217 收了**（`13:01:43 T1217's Worker exited (0) — collecting` → `T1217 collected`），
+说明"停"本身没有损坏任何状态，代价只是那段时间里没人推进。
+
+**另记一处没重启的东西**：我**没有**重启 `.rddev/tools/resolve_decisions.py` 的循环。它的已知缺口 C
+（把"G2 有作业红"一律读成"你的代码有缺陷"）**正好在这条路上**——T1217 若被 accept 拒，
+它会照着 C 再写一封误导的返工信。**最后一笔任务上，待决的判断该由我读，不该交给一份有已知误诊的脚本。**
+
+## 58 — T1217：写下来的收工规矩与**真正被执行的**收工规矩（L1 裁定，2026-09-24）
+
+T1217 是第 160 笔、也是最后一笔。它在 13:39 被 accept，评审独立复核后判 **approve**，
+驱动推送为 **PR #365**。这一条记交付本身、以及评审带出来的一件**比本任务大得多的事**。
+
+### 一、这一笔真正修的是什么
+
+两处"不诚实"，都是**同一族的病**——把规矩写在一处，而强制在另一处，且那处更窄：
+
+1. **陈旧的 `RESULT.json` 会被当成本轮的采信。** `worker_collect.go` 收 `RESULT.json` 时**从不与
+   `rec.StartedAt` 比较**。而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）**重用同一个任务目录**，
+   `archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径——于是一轮**没写过** `RESULT.json` 的返工，
+   会把它上一轮那份交上来，被收成绿的。修法：新增 `result_freshness.go`，按派发时刻的字节/时间戳拒收**与派发那一刻字节相同**的文档。
+2. **`acceptance[].status` 的规矩没写在工人读得到的正文里。** schema 的枚举含 `not_applicable`，
+   而 `result_consistency.go:159-166` 在 `completed` 下**无条件要求全部 `passed`**——照 schema 写就被拒，
+   正文里没人告诉它（T1216 就这样被整笔退回）。修法：把规矩写进 `worker_render.go` 渲染出的正文，
+   与 `tests[]` 那条**并列**成第四条约定。
+
+**第 2 条的修法本身值得记一句**：它没有放宽 `result_consistency.go` 的检查，**改的是正文**——
+"照 schema 写会被拒"这件事，正确的修法是**把话说给读的人**，不是把检查调松。这正是第 6 条 Gate 纪律要的方向。
+
+### 二、评审做了什么（这是本轮我最想记下来的部分）
+
+评审**没有读 `RESULT.json` 就采信**。它自己做了三件事，逐条都是可复核的行为证据：
+
+* **把树拷到 `/tmp`，亲手把新鲜度判定从 `Collect` 里拿掉**（= 复现工人声称的变异），
+  复现出那 5/6 个子测试红，`collect verdict = "ok", want rejected`（`result_freshness_test.go:275`）——
+  **即"没有这段保护，测试真的会红"，而不是"测试长得像在测"**；
+* **程序化**比对基线与提示词：1–3 条 bullet 与基线**逐字节相同**、数词改成 `Four`、第四条与 `tests[]` 那条并列，
+  且**位置**被测试钉住（正文里"the third recording convention below"这句交叉引用仍指向对的段落）；
+* **机械化**核对 `ops/ci/gosec-baseline.txt` 的 diff：11 条重对键的 `category`+`reason` **与删掉那行逐字节相同**、
+  2 条新增、256 条非注释条目、**无 glob/目录键**、diff 里除 `0o755` 外无其他权限字面量、无 `nosec`。
+
+它也确认了**没有放宽任何东西**：`result_consistency.go`、`specs/`、`tests/security/**` **根本没出现在 diff 里**，
+schema 的 sha256 与已提交文件一致，没有测试被 skip/截短、没有 timeout 被挪。
+
+### 三、三条发现（都是证据准确性，没有一条是 blocking）
+
+| 级别 | 事 | 处置 |
+|---|---|---|
+| **minor** | `acceptance[2].evidence` 写「'Three recording conventions' 在树里任何地方都不出现（grep `*.go/*.md/*.json/*.py/*.sh`）」，**而 `tasks/tasks.json` 里有这句**（任务书正文引用了旧标题） | **记账，不退回** |
+| nit | 两处检查计数不复现：`rejection-retry-e2e.sh` 报 45，实测 46；`four-gate-e2e.sh` 报 30，实测 57 | 记账 |
+| nit | 四个文件里有**两个的 mtime 晚于派发时刻**（12:54:10 / 12:54:20，派发 12:52:49）——看起来像"未披露的重写" | 记账（是已披露的变异-还原所致，评审逐项核过还原是忠实的） |
+
+**第一条为什么不退回**（依 `reject-vs-record`）：它是**证据陈述**假，但**被判定的那件事是真的**，
+而且评审**独立复核过真的一半**。更关键的是它假在哪：**假在 `grep` 的范围**——
+它列的模式（`*.go/*.md/*.json/*.py/*.sh`）**本该命中 `tasks/tasks.json`**。
+所以这不是"编了一个结论"，是**仪器的适用范围被说宽了**。
+
+**这就是第 52 条的同一族，第二次**：第 52 条是"**按标签数**却读成全集"（覆盖比声称的窄），
+这一条是"**grep 的范围**比声称的窄"。**两条都是"我用一件仪器下了一个比它能支撑的更大的结论"。**
+第二次数到同一处，说明它是**习惯**而不是失误——**下一次写证据时，把那个 grep/命令原样贴上，而不是转述它的范围。**
+
+### 四、真正要紧的一件：**写入约束对 `Write`/`Edit` 工具根本没生效**
+
+评审的风险 #4 说：`gate-inputs.json` 那个"工人写不到"的前提有洞。**我去核了，它说得对，而且比它写的更明确。**
+`worker-guard.sh` **自己的头文件**写明它管什么：
+
+    - file reads (Read/Grep/Glob/NotebookRead) cannot reach ... the repo's .rddev/ runtime state
+      outside the Worker's own worktree and result dir;
+    - shell writes (rm/cp/mv/ln/install/tee and >/>> redirections) are confined to the Worker's
+      own worktree, its own result dir and /tmp;
+
+**而它的 matcher 是 `Bash|Read|Grep|Glob|NotebookRead`，`permissions.allow` 却是 `["Bash","Write","Edit"]`。**
+于是：**"shell 写入被限制在三个地方"这条，用 `Write` 工具写就整个绕过去了**——
+钩子根本看不到 `Write`，而 `Write` 是允许的。
+
+**为什么这不是小事**：`worker_collect.go:129` 的 `LoadGateInputs` 读的正是
+`.rddev/runtime/tasks/<TASK>/gate-inputs.json`，注释称它为
+「The authoritative spawn-time record (T0012 security fix) ... Collect judges by THESE values」；
+而 `:269` 的 scope 判据 `scopes = gate.AllowedScope` **就是从这个文件里取的**。
+**也就是说：工人用 `Write` 改掉那个文件里的 `allowed_scope`，collect 会照着改后的值放行。**
+（`VerifyGateInputs` 那道"防篡改"比的是**工人可写的那几份副本**与这条权威记录——`worker_collect.go:148-151` 列的是
+registry 字段 / `task-package.json` / 守卫层 / `exit.status`，**恰恰不含 T1217 新加的那两个字段**，
+评审的措辞是准的。）T1217 的新判据**建立在这个前提上**，所以它让这处洞**变得相关**，
+但洞本身**比 T1217 老、也比它宽**。
+
+**与 ㊿ / 第 52 条同族，第三次**：一种保证**写在头文件里**（"shell writes are confined to..."），
+而**强制它的东西比这句话窄**（只管五个工具，不管 `Write`）。**"写在注释里的保证不是机制"**——
+这一次的注释还写在这个机制的自己的源文件里。
+
+**裁定：这是"bug fix / 技术实现"，按 §5.1 不等批准，该我自己决定。我决定：立账。**
+理由三条：(a) 它落在 `internal/devorchestrator/**`，**能派工**（与第 55 条的 A/B/C 三处不同）；
+(b) `tests/worker-guard/guard-regression.sh` 自称对每条规则有**双侧**回归测试，修法有现成的落脚点；
+(c) 它是本项目**反复出现的同一族缺陷的第三次**，不修就会继续以新的形态出现。
+
+**但我不在现在动手**，这是排期决定，理由是具体的：**驱动正在为 T1217 做 merge**（`driver_run.go:399` `stepAccepted`
+在等 PR #365 的 CI）。此刻改 `tasks/tasks.json` 会移动标记（[[state-commit-moves-spec-digest]]），
+而且新任务一旦以可派状态落账，驱动**下一拍就会派工**（[[dispatch-pool-includes-todo]]）——
+**在最后一笔正在合并的时候改 DAG，是拿一件已经接近完成的事去冒不必冒的险。等它落地再动。**
