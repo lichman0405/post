@@ -88,6 +88,17 @@
 #                         the tree — each of those plants carries a .gitignore
 #                         of its own, and one left behind would be read as the
 #                         tree's state by every later run
+#  11. a RE-INCLUSION whose SOURCE PATH CONTAINS A COLON: the same two shapes
+#                         again, with the colon in the path of the file the rule
+#                         was read from rather than in the plant's own name —
+#                         the only one of the two that can be a package of this
+#                         module. The row must stay green, must not refuse the
+#                         re-included file, and must keep the re-included
+#                         package directory in its derived surface AND SCAN it
+#                         (the directory carries a finding, so "it is in the
+#                         surface" is measured and not inferred from a green
+#                         row). Counted as a hit, a header split by counting
+#                         colons loses both halves (2026-09-24, T1225)
 #
 # Cases 2-5 ask the instruments their own questions before they judge the row:
 # case 3 checks with `git check-ignore` that the planted copy really is
@@ -97,13 +108,18 @@
 # being ignored, or stopped being scanned, would otherwise pass by measuring
 # nothing — which is the failure this script exists to catch, one level down.
 # Cases 7-9 ask them the same way, and ask one more thing: that git really
-# prints the shape the case is about (`negation_line_for`) and that the plant's
+# prints the shape the case is about (`reinclude_header_for`, a wrapper over it
+# named `negation_line_for` where only the yes is needed) and that the plant's
 # file really is one the row feeds its surface check (`in_go_files`). A case
 # about a `!` line on a tree where git stopped printing one would pass without
-# ever exercising the reading it exists for.
+# ever exercising the reading it exists for. Case 11 asks the same questions
+# and one about its own plant: that the excludes file it configures really is
+# at a path containing a colon, without which it would be measuring the shape
+# the reader already handles.
 #
 # Runnable on a host with bash + go + gosec + git (`make security-tools`).
-# It runs the go row ten times; see tests/security/sast.sh for the row itself.
+# It runs the go row fifteen times; see tests/security/sast.sh for the row
+# itself.
 #
 # Exit codes
 #   0  every case behaved as above, and the tree was left as it was found
@@ -132,7 +148,17 @@ NEG_FILE_PLANT="tests/security/sast-go-surface-check-neg"     # *.go + !keep.go,
 NEG_DIR_PARENT="tests/security/sast-go-surface-check-negdir"  # negpkg/ + !negpkg/
 NEG_DIR_PLANT="$NEG_DIR_PARENT/negpkg"                        # the directory git re-includes
 TD_PLANT="tests/security/sast-go-surface-check-testdata"      # a package dir with a testdata/ of its own
+# Case 11's plants — the two re-inclusion shapes of cases 7 and 8 again, with
+# the colon in the SOURCE field of the line instead of in the plant's own name.
+# The case says why that is the shape that can reach the row.
+COLON_FILE_PLANT="tests/security/sast-go-surface-check-colon"         # *.go + !keep.go, keep.go beside _drop.go
+COLON_DIR_PARENT="tests/security/sast-go-surface-check-colon-negdir"  # pkg/ + !pkg/
+COLON_DIR_PLANT="$COLON_DIR_PARENT/pkg"                               # the directory git re-includes
 WORK="$(mktemp -d)"
+# The colon of case 11 goes in the PATH OF THE IGNORE FILE git prints as the
+# source of the rule, and nowhere near the name of anything this repository
+# scans: an excludes file this script owns, at a path of its own making.
+COLON_EXCLUDES="$WORK/colon:src/excludes"
 FAILS=0
 
 die()  { echo "sast-go-surface-check: $*" >&2; exit 2; }
@@ -142,7 +168,8 @@ step() { printf '\n== %s ==\n' "$*"; }
 
 cleanup() {
   rm -rf "$PLANT" "$DOT_PLANT" "$FILE_PLANT" \
-         "$NEG_FILE_PLANT" "$NEG_DIR_PARENT" "$TD_PLANT"
+         "$NEG_FILE_PLANT" "$NEG_DIR_PARENT" "$TD_PLANT" \
+         "$COLON_FILE_PLANT" "$COLON_DIR_PARENT"
   rmdir "$PLANT_PARENT" 2>/dev/null || true
   rm -rf "$WORK"
 }
@@ -253,20 +280,27 @@ in_go_files() { # 0 when `go list` returns this file as a source of its package
   # REACH that check can say so instead of assuming it.
   go list -e -f '{{range .GoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}' ./... 2>/dev/null | grep -Fxq "$ROOT/$1"
 }
-negation_line_for() { # 0 when git prints a RE-INCLUSION ('!') line for this path
+reinclude_header_for() { # the <source>:<linenum>:<pattern> header of the '!' line git prints for this path, or nothing
   # The shape the reader in tests/security/sast.sh has to survive, asked of git
   # directly and not of the row: `git check-ignore --stdin -v` answers a path
   # whose last matching rule is a negation with a line whose pattern field
   # starts with `!` — while `git check-ignore -q` on that same path exits 1,
   # because the path is NOT ignored. A case planted on a tree where git stopped
   # printing that line would otherwise pass by measuring nothing.
+  #
+  # It answers with the whole header rather than a yes, because the SOURCE
+  # FIELD is in it — the path of the file the rule was read from — and that is
+  # where case 11 plants a colon.
   local path="${1%/}" line out
   out="$(printf '%s\n' "$path" | git -C "$ROOT" check-ignore --stdin -v 2>/dev/null)"
   while IFS= read -r line; do
     [ "${line##*$'\t'}" = "$path" ] || continue
-    case "${line%%$'\t'*}" in *':!'*) return 0;; esac
+    case "${line%%$'\t'*}" in *':!'*) printf '%s\n' "${line%%$'\t'*}"; return 0;; esac
   done <<<"$out"
   return 1
+}
+negation_line_for() { # 0 when git prints a RE-INCLUSION ('!') line for this path
+  [ -n "$(reinclude_header_for "$1")" ]
 }
 reported_as_finding() { # 0 when the row printed a finding line for this path
   grep -qE "^  $1:[0-9]+:[0-9]+: [A-Z]" "$ROW_LOG"
@@ -536,15 +570,159 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+step "11. a re-inclusion whose SOURCE path contains a colon is not a hit"
+# The header of a `git check-ignore -v` line is
+#
+#   <source>:<linenum>:<pattern><TAB><path>
+#
+# and the SOURCE field is the PATH OF THE FILE THE RULE WAS READ FROM — a path,
+# which may contain a colon like any other path. The reader in
+# tests/security/sast.sh has to split that header to see whether the pattern
+# begins with `!`, and a reader that splits it by counting colons takes the
+# wrong field when the source holds one: what it lands on is
+# `<linenum>:<pattern>`, which does not begin with `!`, so a RE-INCLUSION is
+# read as a hit. Both directions cost, and they are not the same cost: a FILE
+# git does not ignore is refused as local state and the row reds on a tree that
+# is fine, and a package DIRECTORY of this module leaves the derived surface
+# while the row prints a rule that says the opposite of what git said — the
+# shrinking surface T1220 was about, arriving through the check T1220 added
+# (2026-09-24, T1225).
+#
+# THE COLON GOES IN THE SOURCE, NOT IN THE PLANT'S NAME, because only one of
+# the two can reach the row at all. A DIRECTORY whose name contains a colon is
+# not a package of this module: `go list` answers it
+#
+#   malformed import path "…/dir:with:colon": invalid char ':'
+#
+# with no Dir and no GoFiles, so `go list ./...`'s package set never contains
+# it, the row's DERIVED surface never holds it, and there is nothing for the
+# row to classify (measured on this tree with go1.27.1, T1225 — and the
+# two-step strip breaks on the shape built here exactly as it does on that
+# one; a FILE may have a colon in its name, which is why that half of this case
+# is a file and not a directory). What the reader is handed in both
+# constructions is a header whose source field has a colon, and this case
+# builds one that is real in every part: a `core.excludesFile` whose own path
+# holds the colon, holding the same two rules cases 7 and 8 plant — `*.go` +
+# `!keep.go` for a file, `pkg/` + `!pkg/` for a package directory. Both plants
+# are ordinary packages of this module with ordinary names.
+#
+# The environment is exported rather than passed per call, because the row's own
+# `git check-ignore` calls are the thing under test: every git invocation in
+# this case — the row's and this script's — has to see the same excludes file,
+# so the preconditions below are asked in the same environment the row runs in.
+# It is unset again when the case ends.
+has_colon() { case "$1" in *:*) return 0;; *) return 1;; esac; }
+colon_reinclude_header() { # the '!' line's header for <path>, sourced from $COLON_EXCLUDES — or nothing
+  local hdr
+  hdr="$(reinclude_header_for "$1")" || return 1
+  case "$hdr" in "$COLON_EXCLUDES":*':!'*) printf '%s\n' "$hdr"; return 0;; esac
+  return 1
+}
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=core.excludesFile
+export GIT_CONFIG_VALUE_0="$COLON_EXCLUDES"
+mkdir -p "$(dirname "$COLON_EXCLUDES")"
+printf '%s\n' "$COLON_FILE_PLANT/*.go" "!$COLON_FILE_PLANT/keep.go" \
+              "$COLON_DIR_PLANT/"     "!$COLON_DIR_PLANT/" >"$COLON_EXCLUDES"
+
+# The two halves are planted and judged ONE AT A TIME, and that is not
+# tidiness: with both in the tree, the file half reds the surface before the
+# directory half is ever judged, and the directory's verdict would then be a
+# reading of the other plant's failure. Measured — that is what the first
+# version of this case did.
+if ! has_colon "$COLON_EXCLUDES"; then
+  fail "case 11: the excludes file's own path has no colon ($COLON_EXCLUDES), so the source field this case exists for is not being exercised"
+else
+  # --- the package directory ------------------------------------------------
+  mkdir -p "$COLON_DIR_PLANT"
+  clean_go "$COLON_DIR_PLANT/keep.go" colondirprobe
+  finding_go "$COLON_DIR_PLANT/probe.go" colondirprobe
+  if ! in_surface "$COLON_DIR_PLANT"; then
+    fail "case 11: the plant's package directory $COLON_DIR_PLANT is not in the derived surface, so the row never considers it"
+  elif ignored "$COLON_DIR_PLANT"; then
+    fail "case 11: git ignores $COLON_DIR_PLANT, so '!$COLON_DIR_PLANT/' re-included nothing and this case measures nothing"
+  elif ! COLON_HDR="$(colon_reinclude_header "$COLON_DIR_PLANT")"; then
+    fail "case 11: the re-inclusion line git prints for $COLON_DIR_PLANT is not sourced from $COLON_EXCLUDES, so the colon this case is about is not in it"
+  else
+    ok "case 11: git prints the re-inclusion for the package directory with a colon in its SOURCE field:"
+    printf '     %s\n' "$COLON_HDR"
+    # The directory carries a finding, so this run is red ON PURPOSE: a row
+    # that dropped the directory cannot report it. That is the same measurement
+    # case 8 makes, and it is the one that matters here — a row that silently
+    # drops a package of this module is GREEN, and green is what a shrunken
+    # surface looks like from outside.
+    run_row colon-source-dir
+    if grep -qF "$COLON_DIR_PLANT  — git-ignored by" "$ROW_LOG"; then
+      row_fails "case 11: the row dropped the re-included package directory $COLON_DIR_PLANT from the surface, naming a '!' rule as the one that ignored it (printed as NOT scanned)"
+    elif ! reported_as_finding "$COLON_DIR_PLANT/probe.go"; then
+      row_fails "case 11: the row did not report the finding planted in $COLON_DIR_PLANT/probe.go — the re-included package directory under a colon-named source never reached the scanner"
+    else
+      ok "case 11: the re-included package directory under a colon-named source was scanned (its planted finding came back)"
+      grep -E "^  $COLON_DIR_PLANT/probe.go" "$ROW_LOG" | sed 's/^/     /'
+    fi
+  fi
+  rm -rf "$COLON_DIR_PARENT"
+
+  # --- the file -------------------------------------------------------------
+  mkdir -p "$COLON_FILE_PLANT"
+  clean_go "$COLON_FILE_PLANT/keep.go" colonprobe
+  clean_go "$COLON_FILE_PLANT/_drop.go" colonprobe   # the file the '*.go' rule really does exclude
+  if ! in_surface "$COLON_FILE_PLANT"; then
+    fail "case 11: the plant's package directory $COLON_FILE_PLANT is not in the derived surface, so the row never asks git about its files"
+  elif ignored "$COLON_FILE_PLANT/keep.go"; then
+    fail "case 11: git ignores $COLON_FILE_PLANT/keep.go, so '!keep.go' re-included nothing and this case measures nothing"
+  elif ! ignored "$COLON_FILE_PLANT/_drop.go"; then
+    fail "case 11: the '*.go' rule no longer ignores $COLON_FILE_PLANT/_drop.go, so the re-inclusion is not being asked against a real exclusion"
+  elif ! in_go_files "$COLON_FILE_PLANT/keep.go"; then
+    fail "case 11: $COLON_FILE_PLANT/keep.go is not in the file set the row feeds its surface check, so its answer cannot be observed"
+  elif ! COLON_HDR="$(colon_reinclude_header "$COLON_FILE_PLANT/keep.go")"; then
+    fail "case 11: the re-inclusion line git prints for $COLON_FILE_PLANT/keep.go is not sourced from $COLON_EXCLUDES, so the colon this case is about is not in it"
+  else
+    ok "case 11: git prints the re-inclusion for the file with a colon in its SOURCE field:"
+    printf '     %s\n' "$COLON_HDR"
+    # Nothing in the tree carries a finding here, so the row must be GREEN —
+    # and the only way it is not is the reading this case is about: a file that
+    # git explicitly does not ignore, refused as local state.
+    run_row colon-source-file
+    if [ "$ROW_RC" -ne 0 ]; then
+      row_fails "case 11: the go row failed on a file git does not ignore — the source path of the rule that re-included it has a colon"
+    elif grep -qF "$COLON_FILE_PLANT/keep.go" "$ROW_LOG"; then
+      row_fails "case 11: the row named the re-included file $COLON_FILE_PLANT/keep.go among the paths of a failed surface"
+    else
+      ok "case 11: green — the re-included file under a colon-named source was not refused as an escape"
+      grep -E "^     target: this module|^ok   sast-go" "$ROW_LOG" | sed 's/^/     /'
+    fi
+  fi
+  rm -rf "$COLON_FILE_PLANT"
+
+  # --- and gone -------------------------------------------------------------
+  # The last question case 6 asks about its own plants: green again, and
+  # nothing left in the tree. (Case 10 asks it the stronger way — checking the
+  # tree BEFORE removing — because its plants are the ones that would follow
+  # every later run; here the removal is two lines above the check.)
+  run_row colon-source-removed
+  if [ "$ROW_RC" -ne 0 ]; then
+    row_fails "case 11: the row is not green after the colon-sourced plants were removed"
+  elif [ -e "$COLON_FILE_PLANT" ] || [ -e "$COLON_DIR_PARENT" ]; then
+    fail "case 11: this script left a plant of case 11 behind"
+  else
+    ok "case 11: green again after the two colon-sourced plants were removed"
+  fi
+fi
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+
+# ---------------------------------------------------------------------------
 printf '\n== sast-go-surface-check: summary ==\n'
 if [ "$FAILS" -gt 0 ]; then
   printf 'sast-go-surface-check: FAILED — %d finding(s)\n' "$FAILS" >&2
   exit 1
 fi
-printf 'sast-go-surface-check: OK — ten cases: the derived surface is green and prints itself, a copy\n'
+printf 'sast-go-surface-check: OK — eleven cases: the derived surface is green and prints itself, a copy\n'
 printf 'under an ignored dot directory is out of it, a package directory git ignores is dropped and\n'
 printf 'named with its rule, an ignored file inside a package that stays fails the surface by name,\n'
 printf 'POST_SAST_GO_TARGET still scans and prints what it is pointed at, every plant comes out\n'
 printf 'again, a file git RE-INCLUDES is not an escape, a package directory git RE-INCLUDES stays in\n'
 printf 'the surface and is scanned, a Go file under testdata/ is not scanned while the same file one\n'
-printf 'directory up is, and the tree was left as it was found\n'
+printf 'directory up is, a re-inclusion whose rule was read from an ignore file whose PATH holds a\n'
+printf 'colon is not an escape either and does not take its package directory out of the surface, and\n'
+printf 'the tree was left as it was found\n'
