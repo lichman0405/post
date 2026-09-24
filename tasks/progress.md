@@ -3246,9 +3246,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-24T06:04:17Z
+生成时间：2026-09-24T07:03:03Z
 
-状态分布：todo 0 · ready 0 · running 1 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 160（合计 161/161 个任务）
+状态分布：todo 2 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 161（合计 163/163 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3412,6 +3412,8 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1216 | G3 的 Gitea bootstrap 竞态：先让那三步把返回码说出来，再按它说的决定怎么修（#240） | P13 | merged | 2026-09-24T01:57:37Z |  | 2026-09-24T02:21:27Z | 2026-09-24T02:53:26Z |
 | T1217 | 收工校验的两处不诚实：陈旧的 `RESULT.json` 会被当成本轮的采信、`acceptance[].status` 的规矩没写在工人读得到的正文里（#264 + ㊾） | P13 | merged | 2026-09-24T04:52:49Z |  | 2026-09-24T05:39:13Z | 2026-09-24T05:51:29Z |
 | T1218 | `knowledge_publications` 缺 append-only 保护：已发布的 rights_json 可被就地改写（#228，迁移 00157） | P13 | merged | 2026-09-24T02:58:56Z |  | 2026-09-24T03:55:05Z | 2026-09-24T04:07:47Z |
-| T1219 | 工人的写入约束管不到 `Write`/`Edit`：守卫的 matcher 只列了五个工具，而那正是 collect 采信的那份记录的写入口 | P13 | running | 2026-09-24T05:59:12Z |  |  |  |
+| T1219 | 工人的写入约束管不到 `Write`/`Edit`：守卫的 matcher 只列了五个工具，而那正是 collect 采信的那份记录的写入口 | P13 | merged | 2026-09-24T05:59:12Z |  | 2026-09-24T06:48:49Z | 2026-09-24T07:01:12Z |
+| T1220 | SAST 的 go 面声称「扫整个 module」，实际走文件系统把 `.rddev/` 下的副本（rebaseline 草稿、别的工人的工作树）一起扫了：本地 94 条幻影红，而表头那句 797/254 同样过期 | P13 | todo |  |  |  |  |
+| T1221 | 守卫的命令位策略被一个换行整个绕开：`json_field` 把 `\n` 解成字母 `n`，第二行的 `sudo`/`gh`/`git`/`printenv`/`cp`/`rm` 一条都拦不住（含 collect 采信的那份 `gate-inputs.json`） | P13 | todo |  |  |  |  |
 
 <!-- AUTO-PROGRESS:END -->

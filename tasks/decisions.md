@@ -19738,3 +19738,81 @@ T1217 的评审列了七条风险，第 6 条是「`ops/ci/gosec-baseline.txt` �
 - **我第二次用自己的复算代替工具**，第二次造出假证据。**核一个数字，要跑到能反驳它的那层。**
 - **一扇门在 CI 上的面和在本地的面可以不是同一个面**，而"本地那盏不算"这种习惯，
   是最贵的一种绿灯。
+
+## 60 — 一个换行绕开守卫的**每一族**命令位策略：T1219 评审的 observation 对、**诊断错**（L1 记账 + 立账 T1221，2026-09-24）
+
+### 一、起点：T1219 评审的 major 发现
+
+T1219（工人写入约束管不到 `Write`/`Edit`）的独立评审在 verdict 里记了一条 major：
+
+> `command_records()` only analyses the FIRST line of a Bash command, so the write half of the shell
+> policy never sees rm/cp/mv/ln/install/tee on line 2 and later: I measured `true` newline `cp /tmp/x /etc/evil`
+> exiting 0 on BOTH the guard built from HEAD and the guard in this tree … A Worker can therefore still
+> overwrite .rddev/runtime/tasks/<TASK>/gate-inputs.json — the record collect reads allowed_scope from —
+> with `cp`/`tee` on a later line.
+
+它的**观察**是对的，我复现到了；它的**解释**是错的。
+
+### 二、我复现到的（退出码 2 = 拦，0 = 放行；契约环境取 `tests/worker-guard/guard-regression.sh:28-32` 那一组）
+
+    单行 `cp /tmp/x /etc/evil`            → 2（对照）
+    `true; cp /tmp/x /etc/evil`           → 2（对照）
+    `true` + 换行 + `cp /tmp/x /etc/evil` → 0     ← 洞
+    `true` + 换行 + `rm -rf /etc/evil`    → 0
+    `true` + 换行 + `gh auth login`       → 0（单行 2）
+    `true` + 换行 + `sudo ls`             → 0（单行 2）
+    `true` + 换行 + `git commit -m x`     → 0（单行 2）
+    `true` + 换行 + `printenv GITHUB_TOKEN` → 0（单行 2）
+    `true` + 换行 + `echo x | tee /etc/evil` → 2（管线的另一半在拦）
+    `true` + 换行 + `echo x > /etc/evil`     → 2（重定向那一半在拦）
+
+**所以它不是"写策略一处的洞"**：命令位上的每一族策略——控制面 CLI、提权、git、printenv、写——都能被绕开。
+它要紧在第一行：`gate-inputs.json` 是 collect 判作业范围与作业新鲜度的**权威记录**。
+
+### 三、真正的机制（读守卫自己的源码 + 判别性探针）
+
+**下面的行号都是 2026-09-24 观测当天、T1219 尚未合并时的 `main`；** 合入 T1219 之后它们整体后移（实测：`json_field` `:76`→`:91`、转义臂 `:91-92`→`:106-107`、`command_records` `:138`→`:194`、`pending=1` `:169-180`→`:228`/`:250`、`tool_name` `:458`→`:521`、`command` `:463`→`:526`）。**行号会漂，锚点不会**——按 `if (c == "\\")`、`json_field`、`command_records` 这些文本找。
+
+评审说的是 `command_records` 只分析第一行。**那一层是好的**：它的 awk（`embed/worker-guard.sh:138` 起）
+每读一行都把 `pending = 1`（`:169-180`），真拿到换行它会**正确地**开一个新段。
+
+坏的是**取文本的那一层**：`:463` 是 `command=$(printf '%s\n' "$input" | json_field command)`，而
+`json_field`（`:76`）是 awk **文本扫描**，不是 JSON 解析器。它的转义处理在 `:91-92`——
+
+    if (esc) { out = out c; esc = 0; continue }
+    if (c == "\\") { esc = 1; continue }
+
+——**把反斜杠后面的字符原样收下**，不解释。于是 JSON 里的 `\n` 解出来是字母 `n`（不是换行），
+第二行被**焊进上一行最后一个词**：`true` + 换行 + `cp …` 变成 `truencp …`，命令位解析从此看不到 `cp`。
+而 `;`、`|`、`&` 不需要转义、原样留着，所以 **`;` 拦得住、换行拦不住**。
+
+**同一个函数、同一类问题还留在 `tool_name`（`:458`）**——它决定 dispatch 走哪个分支，取错就等于
+没有分支匹配、直接 `exit 0` 放行。T1219 已经把 Read/Write 两条路换成了真的解析（`json_string`，解析失败 `sys.exit(3)`），
+Bash 这一条是剩下最后一个把**命令文本**交给文本扫描的地方。
+
+### 四、同笔还应收两处「话比机制宽」
+
+- `worker_render.go:529` 承诺守卫限制「your shell writes, **file reads** and control-plane commands」，
+  而经 Bash 的读**没有任何限制**：`cat ~/.ssh/id_rsa`、`cat …/gate-inputs.json` 实测都是 rc=0
+  （`read_policy` 只挂在读工具与写文件工具那两条路上，`redirect_policy` 与命令位分析都不看读）。
+- `gate_inputs.go:21` 说那个运行态目录「refuses for both reads and shell writes」——T1219 之前对 `Write` 工具是**假的**，
+  现在是真的但说得比实际窄。
+
+这是同一族（保证写在 A 处、强制它的机制在 B 处）在本项目的**第五次**。
+
+### 五、裁定
+
+§5.1 属 bug fix：方向是**让已经写在契约里的限制真的生效**，不新增权限、不放宽任何限制 → **L1，我自己决定**。
+立账 **T1221**，`dependencies: ["T1202","T1219"]`（T1219 是直接前作），`g3_jobs: ["mof-canonical"]`
+（其 `requires_tasks` 是 T1202，已含在依赖里），允许面与 T1219 同组
+（`internal/devorchestrator/**`、`tests/worker-guard/**`、`.rddev.example/**`）。
+
+### 六、教训
+
+- **观察对了、解释错了，这是第四次**（前三次都是我自己），而**这一次出现在独立评审的 verdict 里**。
+  评审说得很确定（"only analyses the FIRST line"），而它给的机制指向一个**没有缺陷的函数**——
+  照着它去"修" `command_records`，洞会原封不动地留着。所以 T1221 的任务书**把机制写出来并要求工人复核**，
+  不是让它照抄；也明说评审的诊断是错的。
+- **判定方与被判定方的关系**才是这类洞的重量所在：`gate-inputs.json` 不是一份普通文件，
+  它是"作业范围/新鲜度"这个判断的**唯一权威输入**。同一位置 T1219 关掉的是 `Write`/`Edit` 那条路
+  （matcher 不认这两个工具），而 shell 那条路一直开着——**两条路要一起堵才算堵上**。

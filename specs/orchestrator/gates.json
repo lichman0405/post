@@ -1212,6 +1212,16 @@
       "g3_jobs": [
         "mof-canonical"
       ]
+    },
+    "T1220": {
+      "g3_jobs": [
+        "security-master"
+      ]
+    },
+    "T1221": {
+      "g3_jobs": [
+        "mof-canonical"
+      ]
     }
   }
 }

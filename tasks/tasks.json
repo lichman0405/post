@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 161,
+  "task_count": 163,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -9320,6 +9320,150 @@
       ],
       "scope_note": "这一笔是**修一个已经写在文件里的保证没有真的成立**，不是新增能力，也没有改任何产品语义。守卫脚本的头文件自述「shell writes 被限制在工人的工作树/结果目录/`/tmp`」，而它的 matcher 只认 `Bash|Read|Grep|Glob|NotebookRead` 五个工具，`Write`/`Edit` 却同时在 `allow` 里——**保证写在一处，强制它的东西在另一处且更窄**（同一族缺陷在本项目的第三次）。它要紧，是因为 `worker_collect.go:269` 拿来判作业范围的 `gate.AllowedScope` **取自一个工人用 `Write` 就能改的文件**；而 `specs/orchestrator/worker-permissions.yaml` 的 `collection_invariants` 已经把「不得采信被判定方写得进去的字段」写成原则。第二处（那套双侧回归测试没有任何东西在跑）之所以并进同一笔，是因为**不并进来，第一处的修法就没有东西在守**。",
       "supervisor_scope_narrowing": "**为什么把 `tests/worker-guard/**` 与 `.rddev.example/**` 收进允许面：**\n\n  * `tests/**` 通常关着，是为了不让工人弱化测试。这一笔**必须**在那套双侧回归测试里加用例（那是守卫规矩唯一被两侧证明过的地方），所以只开 `tests/worker-guard/**` 这一条路径；**收工校验的是 `allowed_scope`，只放行允许面里的路径**，所以 `tests/**` 的其余部分仍然写不进去，而 `tests/worker-guard/guard-regression.sh` 里既有用例的任何删改都会在收工的 scope 检查上暴露出来。\n  * `.rddev.example/**` 是因为 `worker_guard_test.go:21-26` 强制内嵌脚本与它**逐字节相同**——不同步就会红，而它不在 `internal/devorchestrator/**` 里。\n\n**两条实现路线我不替你选**（这是 L1，你的判断）：扩 matcher 与生成 `permissions.deny` 各有取舍，**但选哪条都要给出理由**，并且**必须先自己复核那个洞确实存在**再动手——如果复核下来它不存在（比如某个我没看到的层已经挡住了），**照实写进 RESULT 说它不存在**，那一笔就变成「加固一个原本就成立的东西」，按判据第 2 条给出证据即可，不要为了交差去造一个洞。"
+    },
+    {
+      "id": "T1220",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "SAST 的 go 面声称「扫整个 module」，实际走文件系统把 `.rddev/` 下的副本（rebaseline 草稿、别的工人的工作树）一起扫了：本地 94 条幻影红，而表头那句 797/254 同样过期",
+      "v1_required": false,
+      "dependencies": [],
+      "tests": [
+        "the go SAST row's default surface is the repository's own Go source and nothing outside it",
+        "a scanned path that git ignores reds the row as a surface failure instead of arriving as a finding",
+        "the go row still scans exactly what POST_SAST_GO_TARGET points at, and prints it",
+        "the SAST baseline's declared file and finding counts match the file they describe, with the command that re-derives them",
+        "the other two SAST faces' declared targets are the surface their reports actually cover"
+      ],
+      "allowed_scope": [
+        "tests/security/**",
+        "ops/ci/gosec-baseline.txt"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**（`ops/ci/gosec-baseline.txt` 除外）",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "internal/**",
+        "tests/**（`tests/security/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/23_SECURITY_PRIVACY.md",
+        "docs/25_CICD_DEVOPS.md",
+        "docs/67_TEST_GATES.md"
+      ],
+      "requirements": [
+        "**先自己复跑现状，别照抄我的话。** 在仓库根目录跑 `bash tests/security/sast.sh go`。**我这次跑到的**（2026-09-24，仓库根目录有 `.rddev/` 时）：`FAIL sast-go: 350 finding(s), 94 unbaselined (1274 file(s) scanned)`，基线里当时是 256 条。**你的数字可能不同**（`.rddev/` 里副本的多少随本机状态变），以你跑到的为准，并把你的输出逐字贴进 RESULT。下面每条都给了出处，先到树里核一遍；核出来与我说的不一样，以树为准并写明。",
+        "**洞的形状（我核过的出处，你复核）。** `tests/security/sast.sh:102` 是 `TARGET=\"${POST_SAST_GO_TARGET:-.}\"`，`:108` 的调用是 `gosec -fmt=json -out=\"$WORK/gosec.json\" -quiet \"${TARGET%/}/...\"`。**gosec 走的是文件系统**（它按目录树找 `.go`），不是「按 module 解析包」，所以默认的 `./...` 从仓库根一路走下去，把被 gitignore 的目录也当成待扫源码。`.rddev/` 由 `.gitignore:10` 忽略（`git check-ignore -v .rddev/runtime/rebaseline` 实测命中那条），里面有两处**仓库源码的副本**：`.rddev/runtime/rebaseline/<TASK>-<时间戳>/files/**`（rebaseline 在 `reset` 之前拷出的源文件；我实测 864 个 `.go`、108M）与 `.rddev/worktrees/**`（各任务的工作树；我实测 12338 个 `.go`，含**别的工人尚未提交的改动**）。**我这次实测的分解**（用这一行自己的 stderr 输出数的，不是我的话）：94 条未基线**全部**在 `.rddev/runtime/rebaseline/**` 下，涉及 T0304/T1110/T1205/T1004/T0606/T0309/T0303 等任务留下的副本，**仓库自己的源码里 0 条未基线**；`.rddev/worktrees/**` 这一次没有出现在列表里（可能是各工作树自带 `go.mod` 造成的边界，**这正是你要核清的一件事**——如果它其实也会被扫，修法必须同时挡住它）。把你自己跑到的路径前缀去重排序贴出来当证据。",
+        "**这一处比「多数了文件」更难看：它让本地的红灯既不真也不假。** 那 94 条「未基线」全部来自副本，它们不是仓库的发现，**而本地任何一次 G4/自查都会踩到**——`ops/ci/gosec-baseline.txt:16-17` 那句「surface: every package in the module. Nothing was excluded by directory, severity or -nosec」因此**不成立**。三道现有保护都看不见它：CI 是绿的（检出里根本没有 `.rddev/`，这个面只在**有运行态的根目录**出现，而那正是我跑 G4 的地方）；`FLOOR_GO_FILES=400`（`sast.sh:73`）拦的是「扫了个空」，这次是**扫多了**；版本钉（`v2.29.0`）是对的——**不是工具错了，是目标选错了**。",
+        "**修「声明的面」，不是「让红变绿」。一半是换面，一半是加锁，两半都要。**\n\n**(a) 换面**：默认（`POST_SAST_GO_TARGET` 未设）时必须扫**仓库自己的 Go 源码**，而且要**推导出来**——不许手工维护一张包清单，也不许把路径写死；`go list ./...` 这类由工具给出的包集合是可以的（注意 Go 的包模式本来就跳过 `.`/`_` 开头的目录与 `testdata`，这正是它与 gosec 自己的遍历不同之处）。`POST_SAST_GO_TARGET` 覆盖必须继续可用：**覆盖存在是为了让人把这一行指向一个故意种下的 fixture 去证明它会红**（`sast.sh:59-60` 的 floor 注释逐字写着「They apply to the DEFAULT surface only — a mutation run points the row at a planted fixture on purpose, and prints the target it used」）。\n\n**(b) 加锁**：加一条**正向断言**——这一行扫的每个路径都必须是**仓库里的路径**（在 `$ROOT` 之内、且 `git check-ignore` 不命中）；命中任何一条就以「**扫描面失败**」报红，且**报出是哪条路径**，而不是把它当成一条待裁定的发现。**只有 (a) 没有 (b)**，下次有人把目标改回去就没人拦；**只有 (b) 没有 (a)**，本机只要存在 `.rddev/` 这一行就永久红——那是又一个假红。两半缺一不可。",
+        "**覆盖模式与那条断言的关系，由你决定并写清楚。** 覆盖模式下扫的就该是它被指向的东西（那是它存在的理由），所以断言在那时该放松还是该换个形式，是你的判断；**但必须**：两种用法各有一个用例、断言在默认模式下的行为被钉住、以及覆盖模式下「为什么这次可以放松」在输出里看得见（现在它已经打印 `target: ...`，别把它删了）。",
+        "**不许用排除式修法，也不许弱化任何现有的一行。** `sast.sh` 自己的第 3 条规则禁的就是这些：不许 `-exclude-dir`、不许 `-nosec`、不许抬 severity 阈值、不许关规则。另外：不许把 `FLOOR_GO_FILES` 调高来「解释」变大的面（这一笔的方向是让面**回到**仓库规模），不许删/跳过任何现有行，不许把 `sast-go` 从总门里摘掉，`tests/security/master-security-gate.sh` 的 `MIN_CHECKS` 这一笔不动（没有增减行）。",
+        "**不许把 `.rddev/...`（或任何仓库里不存在的路径）写进基线。** 那 94 条不是发现，是副本的回声；把副本路径记进 `ops/ci/gosec-baseline.txt` 是**给仓库里不存在的路径背书**，比现在更坏。基线今天 256 条（`grep -c '^[^#]' ops/ci/gosec-baseline.txt`），除非有**仓库里真实存在**的理由，条目数与内容都不动；动了就写明是哪条、为什么。",
+        "**两处过期数字**：`ops/ci/gosec-baseline.txt:14` 的表头写着「797 files, 254 findings」，`tests/security/sast_report.py:9` 的 docstring 复述同一个 254；而文件里现在是 **256** 条。那个 254 **在写下时是对的**（表头由 T1209 写就，`git show 034a341:ops/ci/gosec-baseline.txt` 里正是 254 条），中间 T1217 的合并（`2d5d280`）净 +2 条，而没有人抬头看那句表头。要求：把两处改成本次实测的**真值**，并且**写明这个数字是怎么来的**（一条可重跑的命令，例如把 `sast.sh go` 的输出行或一条 `grep -c` 写进去）。反例就在同一个文件里：`sast.sh:56-63` 的三个计数（那句免责在 `:63`）带日期、并且自己声明「not a list this comment maintains」——**差别只在有没有那句免责**，照那个形状写。",
+        "**把「为什么是这个面」写进文件本身**，一句话就够：目标为什么由包集合推导、而不是从仓库根遍历；否则下一个人会把它「简化」回 `${TARGET%/}/...`，而这个缺陷正是这么来的。同时照实写清这个面的边界——CI 一直绿、本地才红，因为只有本机根目录才有 `.rddev/`。",
+        "**顺手核另外两面**：`sast-python`（`sast.sh:137` 目标 `services/scientific-adapter/src`）与 `sast-node`（`:183` 目标 `apps/web packages/ui`）声明的目标，是不是**它们报告里实际覆盖的面**（例如：报告里出现的文件是否都在声明目标之内）。**这两面声明的是明确的目录列表、不是从仓库根遍历**，所以很可能本来就成立——**成立就给一行证据**（列一下报告里的路径前缀），不要为了凑活去改它们；**不成立就同一笔修掉**（同一条正向断言可以共享）。"
+      ],
+      "deliverables": [
+        "`tests/security/sast.sh` 的扫描面修正（默认面 = 仓库自己的 Go 源码，推导得到而非写死）与那条正向断言；注释里写清为什么不是排除式，以及为什么覆盖模式例外。",
+        "一条**能红**的负向用例：构造「一个被 gitignore 的路径进入扫描面」，证明行以「扫描面失败」报红并指出路径；含撤销该断言后的实际输出（MUTATION CHECK）。",
+        "`ops/ci/gosec-baseline.txt` 表头（与 `tests/security/sast_report.py:9`）的真值，各自带一条可重跑的取得命令。",
+        "一份属于本轮的 `RESULT.json`：上面每条判据各自的证据，含你复核后与我说的不一致的地方——照实报，别为了对齐我的话而改数。"
+      ],
+      "acceptance_criteria": [
+        "**本地这一行从红变绿，且面回到仓库规模**：贴出改动前后各一次的 `bash tests/security/sast.sh go` 实际输出（我这次的前值是 `FAIL sast-go: 350 finding(s), 94 unbaselined (1274 file(s) scanned)`；你的前值以你跑到的为准），后值必须是 PASS，且 `file(s) scanned` 落到仓库自身规模（与 `git ls-files '*.go' | wc -l` 同量级，而不是上千）。",
+        "**这个判据能红**：MUTATION CHECK——把你这处新断言撤掉（或让它恒真），同一份「扫描面逃逸」用例必须**不再被拒**（给出撤销后的实际输出），然后还原。**修之前红不了的话，这一条就是构出来的。**",
+        "**逃逸是跑出来的，不是读代码推的**：给出一条可执行命令与它的输出，证明一个被 gitignore 的路径进入扫描面时行会红，并**打印出是哪条路径**；同时给出修复后同一场景的行输出。",
+        "**没有排除式修法，基线没被喂副本**：`grep -n 'exclude\\|nosec' tests/security/sast.sh` 与改动前逐字一致（贴出来）；`grep -c '^[^#]' ops/ci/gosec-baseline.txt` 仍是 256；`grep -c '\\.rddev/' ops/ci/gosec-baseline.txt` 是 0。",
+        "**两处 254 变成真值且可重推**：表头与 docstring 的数字与文件实际一致，且各自写明取得它的命令；`grep -rn '254' ops/ci/gosec-baseline.txt tests/security/sast_report.py` 不再有陈旧命中。",
+        "**覆盖路径仍然可用**：把 `POST_SAST_GO_TARGET` 指向一个种下的 fixture，贴出行确实扫了它并给出该 fixture 的发现；这一模式下新断言的行为被写清楚、有用例钉住。",
+        "**另外两面给了正/反证据**：python 与 node 两面的「声明目标 = 报告覆盖的面」各有一行证据（报告里的路径前缀），或同一笔修掉的说明。"
+      ],
+      "scope_note": "这一笔修的是**安全门自己的仪器**：它对外声称扫「整个 module」，实际把被 gitignore 的运行态副本（rebaseline 草稿、别的工人的工作树）也当成仓库源码扫了一遍。**没有改任何产品语义、安全边界或权限模型**，方向是**更严**——从「文件系统里有什么就扫什么」变成「只扫仓库自己的源码，多出任何一条路径就报扫描面失败」。它也不动任何被判定的代码：改的是那一行**怎么选目标**、以及它**怎么证明自己选对了**。为什么并进同一个 P13 阶段：同一族缺陷（保证写在 A 处、强制它的机制在 B 处且更宽）在本项目已记过四次，这一次的位置最尴尬——它在门自己身上，而门的红/绿是我判 G4 的依据。",
+      "supervisor_scope_narrowing": "**为什么开 `tests/security/**` 与 `ops/ci/gosec-baseline.txt`：**\n\n  * `tests/**` 通常对工人关闭，是为了不让工人弱化测试。这一笔要修的东西**本身就是一条测试行**（`tests/security/sast.sh`），所以只开 `tests/security/**` 这一条路径；其余 `tests/**` 仍然写不进去，而 `tests/security/` 里既有断言的任何放宽都会在下面判据第 4 条上暴露出来（我会逐字对比 `grep -n 'exclude\\|nosec'` 的结果，也会独立重跑这一行）。\n  * `ops/ci/gosec-baseline.txt` 只开给**表头那句事实**；基线条目本身不许长、也不许出现副本路径（判据第 4 条）。`ops/**` 的其余部分仍为 Supervisor 所有。\n\n**这是 L1，不是 L3**：修的是仪器选目标的方式与它自我证明的方式，不新增权限、不放宽任何限制、不改产品语义。**先复核再动手**——如果你核下来发现这个洞不存在（例如 gosec 的某个行为把 `.rddev/` 挡在外面了），**照实写进 RESULT 说它不存在**并给出证据，不要为了交差去造一个洞出来。"
+    },
+    {
+      "id": "T1221",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "守卫的命令位策略被一个换行整个绕开：`json_field` 把 `\\n` 解成字母 `n`，第二行的 `sudo`/`gh`/`git`/`printenv`/`cp`/`rm` 一条都拦不住（含 collect 采信的那份 `gate-inputs.json`）",
+      "v1_required": false,
+      "dependencies": [
+        "T1202",
+        "T1219"
+      ],
+      "tests": [
+        "a command-position policy refuses a verb on the second line exactly as it refuses it on the first",
+        "every separator the shell honours (; | && || & and a newline) starts a new command position for every verb family the guard names",
+        "an unreadable tool-input payload is refused rather than allowed through with no command to inspect",
+        "the contract sentence's claim about reads is either enforced or not made, and a test binds the two",
+        "the guard's two-sided suite grows by the new cases with every pre-existing case byte-identical"
+      ],
+      "allowed_scope": [
+        "internal/devorchestrator/**",
+        "tests/worker-guard/**",
+        ".rddev.example/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "cmd/**",
+        "tests/**（`tests/worker-guard/**` 除外）"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/67_TEST_GATES.md",
+        "docs/23_SECURITY_PRIVACY.md"
+      ],
+      "requirements": [
+        "**先自己复跑，别照抄我的话。** 起点是 T1219 那次独立评审的 major 发现（评审 observation 对、**诊断错**，见下条），它是在 T1219 合并时被记下来的、**不在那一笔的 diff 里**——所以这一笔是它的后续。复现方式：把守卫脚本单独跑起来，契约环境用 `tests/worker-guard/guard-regression.sh:28-32` 那一组（`POST_REPO_ROOT=/repo`、`POST_WORKER_TASK_ID=T0010`、`POST_WORKER_WORKTREE=/repo/.rddev/worktrees/T0010`、`POST_WORKER_RESULT_DIR=/repo/.rddev/workers/T0010`），stdin 喂 `{\"tool_name\":\"Bash\",\"tool_input\":{\"command\": ...}}`，看退出码（2 = 拦，0 = 放行）。**我实测的**（2026-09-24，`internal/devorchestrator/embed/worker-guard.sh`，命令第二行用换行分隔）：\n\n    `cp /tmp/x /etc/evil` 单行 → rc=2（对照，拦）\n    `true; cp /tmp/x /etc/evil` → rc=2（对照，拦）\n    `true` + 换行 + `cp /tmp/x /etc/evil` → **rc=0（放行）**\n    `true` + 换行 + `rm -rf /etc/evil` → **rc=0**\n    `true` + 换行 + `gh auth login` → **rc=0**（单行时 rc=2）\n    `true` + 换行 + `sudo ls` → **rc=0**（单行时 rc=2）\n    `true` + 换行 + `git commit -m x` → **rc=0**（单行时 rc=2）\n    `true` + 换行 + `printenv GITHUB_TOKEN` → **rc=0**（单行时 rc=2）\n    `true` + 换行 + `echo x | tee /etc/evil` → rc=2（**拦住了**，管线的另一半在拦）\n    `true` + 换行 + `echo x > /etc/evil` → rc=2（**拦住了**，重定向那一半在拦）\n\n以你跑到的为准，把你的表贴进 RESULT。**注意这不是写策略一处的洞**：命令位上的**每一族**策略（控制面 CLI、提权、git、printenv、写）都能被它绕开。",
+        "**机制（我核过的；评审的诊断是错的，你复核）。** Bash 那一条路取 `command` 用的是 `internal/devorchestrator/embed/worker-guard.sh:526` 的 `command=$(printf '%s\\n' \"$input\" | json_field command)`，而 `json_field`（`:91`）是 awk **文本扫描**：它的转义处理在 `:106-107`（**行号是合入 T1219 之后的树**；T1219 之前分别是 `:463` / `:76` / `:91-92`。按 `if (c == \"\\\\\")` 与 `json_field` 这两个锚点找，别信行号）——见到 `\\` 就把**下一个字符原样收下**，于是 `\\n` 解出来是字母 `n`，第二行被焊进上一行最后一个词（`true` + 换行 + `cp …` 解成 `truencp …`），命令位解析从此看不到 `cp`。而 `;`、`|`、`&` 都不需要转义、原样留着，所以 `;` 拦得住、换行拦不住。**评审 verdict 里把这写成「command_records 只分析第一行」，那是错的**：`command_records` 的 awk（`:194` 起；T1219 前是 `:138`）每读一行都会把 `pending=1`（`:228`、`:250`），真拿到换行它会正确地开一个新段。**行为是复现出来的，诊断以你复核的为准**——如果你核下来机制与我说的一样，照这个修；不一样，以树为准并在 RESULT 里写清楚（这一条本身就是本项目的常见缺陷族：观察对了、解释错了）。",
+        "**修法（L1，你的判断，但要把理由写进注释）**：让命令位分析看到**每一段**命令——每一种 shell 认的分隔符之后都重新开始命令位，包括换行。T1219 已经把 Read/Write 两条路从 `json_field` 换成了真的 JSON 解析（`json_string`，`sys.exit(3)` 在解析失败时非零）；Bash 这一条是**剩下最后一个**把命令文本交给文本扫描的地方，`tool_name`（`:521`）是同一个函数、同一类问题，一并判断（它决定 dispatch 走哪个分支，取错就等于没有分支匹配、直接 `exit 0` 放行）。解析不了就**拒**，不是放行——这是这个文件自己的 fail-closed 契约。",
+        "**每一族都要有「第二位」的两侧用例**：分隔符 `;`、`|`、`&&`、`||`、`&`、换行 × 动词族 `cp/rm/mv/ln/install`（写）、`sudo/su/doas/pkexec`（提权）、`gh/glab/tea`（控制面）、`git`、`printenv`。**两侧都要**：必须被拦的一侧、必须放行的一侧（`tests/worker-guard/guard-regression.sh` 的既有形状）。别只补 cp 那一条——那个洞不挑动词。",
+        "**契约里关于 reads 的那半句话现在不成立，要么让它成立、要么把话说准。** `worker_render.go:529`（行号是**合入 T1219 之前**的 main；T1219 把这句话改写成了点名 `Write`/`Edit` 工具的形状，合并后行号会挪，按句子找）承诺守卫「confines your writes (…) **your file reads** and your control-plane commands」，而经 Bash 的读是**没有任何限制**的：我实测 `cat ~/.ssh/id_rsa` 与 `cat /repo/.rddev/runtime/tasks/T0010/gate-inputs.json` 都是 rc=0（`read_policy` 只挂在读工具与写文件工具那两条路上，`redirect_policy`/命令位分析都不看读）。**选哪条路是你的判断**（把读限制扩到 Bash 是另一件大得多的事，而且 `cat`/`grep`/`sed` 的分析注定是 best-effort），但**句子与强制它的东西必须在同一个提交里**：`TestTheGuardClaimInTheSystemPromptIsTrue` 现在只钉了写的那半（那是 T1219 加的），把读的那半也钉上，并证明这个测试**能红**。**不许**留着比强制更宽的句子——这正是本任务族反复出现的东西。",
+        "**同一笔照实对齐那处注释**：`internal/devorchestrator/gate_inputs.go:21` 写着那个运行态目录是「a path the Worker's guard refuses for both reads and shell writes」。它在 T1219 之前**对 `Write` 工具是假的**、现在是真的但说得比实际窄（写文件工具也被挡）。改成一词（writes）即可，别扩写。",
+        "**不许弱化任何既有用例。** 现在 188 条（T1219 之后）必须**逐字**保留——我会用 `comm -23` 对比全文（不是只对比名字），任何一条被删、被改名、被放宽都会被抓出来。新用例让计数上升：`internal/devorchestrator/worker_guard_regression_test.go` 里那个 `floor` 要**有意识地**抬起（并说明抬到多少、为什么），不许为了让某个用例过而调低它。",
+        "**把仍然 best-effort 的部分写清楚，别让文档比强制宽。** 至少这三处要照实写：`sh -c '…'` 的内容对 analyze 不透明（设计如此）；命令位分析只看命令文本、不看 `$变量`/`$(…)` 展开后的结果；带引号的重定向会被保守地过度拦截。**这一笔不要求关闭 `sh -c`**（那是另一个量级的工程，也未必能做成机械保证），要求的是**说清楚边界在哪**。",
+        "**`embed/worker-guard.sh` 与 `.rddev.example/guard/worker-guard.sh` 必须逐字节一致**（`TestGuardScriptEmbeddedMatchesExample` 钉着），改动两处一起改。改完 `gofmt`/`go vet`/`staticcheck` 在 `internal/devorchestrator` 包里干净；`ops/ci/gosec-baseline.txt` 是按 `path:line:column:RULE` 记账的，**在已基线发现的上方插行会让那一行变红**——T1217 撞过一次，动文件时注意（`ops/**` 不在你的允许面里，所以别去改基线）。"
+      ],
+      "deliverables": [
+        "`internal/devorchestrator/embed/worker-guard.sh`（与逐字节同步的 `.rddev.example/guard/worker-guard.sh`）：命令位分析覆盖每一段命令，含换行；最后一个文本扫描（`command`，以及 `tool_name`）换成真解析并 fail-closed；必要的话更新 `worker_guard.go` 的 matcher 相关常量（T1219 已把 matcher 提成 `guardMatcher`）。",
+        "`tests/worker-guard/guard-regression.sh` 的新用例：分隔符 × 动词族，每条**两侧**（拦 / 放行）；含 `json_field` 转义行为本身的用例（`\\n`、`\\t`、`\\\"`、`\\u0041`）。",
+        "契约句子（`worker_render.go`）与 `TestTheGuardClaimInTheSystemPromptIsTrue` 的更新：读的那半要么被强制、要么被删掉；`gate_inputs.go:22` 的注释对齐。",
+        "一份属于本轮的 `RESULT.json`：上面每条判据各自的证据，含你复核后与我说（或与评审 verdict）不一致的地方——照实报，别为了对齐我的话而改数。"
+      ],
+      "acceptance_criteria": [
+        "**换行不再是免检通道**：贴出你实测的前后两张表（每条动词族：单行拦、换行也拦），命令与退出码逐条列出。我这次的前值是上面那张表（换行那几行 rc=0）。",
+        "**这个判据能红**：MUTATION CHECK——把你这处修法撤掉，同一组「第二位」用例必须**不再被拒**（给出撤销后的实际输出），然后还原。**修之前红不了的话，这一条就是构出来的。**",
+        "**两侧都在**：每种分隔符 × 每个动词族各有拦与放行两条，贴出 `guard-regression: N/M PASS` 的新计数，并说明新增了几条。",
+        "**既有用例一条没动**：`comm -23`（对全文、`LC_ALL=C`）在改动前后的 188 条上输出为空，命令与结果一并贴出。",
+        "**fail-closed 有证据**：喂一个解析不了的 payload（例如截断的 JSON）时行**拒绝**并把理由打印出来，贴输出。",
+        "**契约与强制绑在一处且能红**：改后的句子、钉它的测试、以及「撤掉强制 → 该测试红」的实际输出，三样都在。若你选择把读限制扩到 Bash，同样给两侧证据；若选择把话说准，给出改后的句子与它对应的强制点。",
+        "**`json_field` 的去留写清楚**：RESULT 里列出这一笔之后还剩哪些调用点、各自为什么可以留（或为什么也换了），以及 `tool_name` 的处理结论。"
+      ],
+      "scope_note": "这一笔修的是**工人隔离机制里的一处整体绕行**：守卫按命令位判断禁止动作（提权、控制面 CLI、git 写操作、printenv 探针、信封外的写），而只要把第二条命令放到下一行，整套判断就看不见它。**没有改任何产品语义、安全边界或权限模型**——方向是让已经写在契约里的限制真的生效。它要紧在两点：一是**判定方与被判定方的关系**，`gate-inputs.json` 是 collect 判作业范围与作业新鲜度的权威记录，而绕行能让工人改写它（T1219 关掉的是 `Write`/`Edit` 那条路，这一条是 shell 那条路）；二是**观察对了、解释错了**在本项目已出现多次，这一次出现在独立评审的 verdict 里，所以任务书把机制写出来并要求工人复核，而不是照抄。",
+      "supervisor_scope_narrowing": "**为什么开 `internal/devorchestrator/**`、`tests/worker-guard/**`、`.rddev.example/**`（与 T1219 同一组）：**\n\n  * 修的是守卫脚本本身与它的生成物；`.rddev.example/guard/worker-guard.sh` 之所以在允许面里，是因为 `worker_guard_test.go` 强制它与内嵌脚本**逐字节相同**，不同步就红。\n  * `tests/worker-guard/**` 是那套双侧回归套件唯一的家；`tests/**` 的其余部分仍对工人关闭，而套件里既有用例的任何删改都会在收工的 scope 检查与判据第 4 条上暴露。\n  * 契约句子所在的 `worker_render.go`、注释所在的 `gate_inputs.go` 都在 `internal/devorchestrator/**` 里，不需要额外开口。`ops/**`（含 gosec 基线）**不在**允许面里：这一笔只要求你别去动它、别在已基线发现上方插行。\n\n**这是 L1，不是 L3**：修的是既有保证的强制方式，不新增权限、不放宽任何限制。**先复核再动手**——机制那段话如果与树不符，以树为准并写明。"
     }
   ]
 }

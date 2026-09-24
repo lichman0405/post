@@ -1880,6 +1880,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1220-TEST-01",
+      "task_id": "T1220",
+      "name": "the go SAST row's default surface is the repository's own Go source and nothing outside it",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1221-TEST-01",
+      "task_id": "T1221",
+      "name": "a command-position policy refuses a verb on the second line exactly as it refuses it on the first",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }
