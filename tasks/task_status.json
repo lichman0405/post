@@ -12104,7 +12104,7 @@
       ]
     },
     "T1216": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-09-24T01:57:37Z",
       "notes": "新立账（2026-09-24，与 T1215 同批）：#240——G3 的 `gitea-real-services` 偶发红在 bootstrap 那三步上（`tests/acceptance/gitea-real-services-e2e.sh:529-531` 三个请求串在一条 `&&` 链里，`:534` 的失败话术说不出是哪一步、什么码），量到的频率约 5 次红 1 次（原件 `.rddev/runtime/gates/T0406/output/run-b17e9d3d09e0652d-g3/gitea-real-services/00.log`）。任务书见 `tasks/packages/T1216.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`gitea-real-services`，该作业没有 `requires_tasks`，故 `dependencies` 为空）。`v1_required=false`：这是流水线加固，不是产品交付。",
       "worker_run_id": "run-68e8c5494365fa65",
@@ -12136,8 +12136,19 @@
           "at": "2026-09-24T01:57:37Z",
           "run_id": "run-68e8c5494365fa65",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-24T01:58:37Z",
+          "run_id": "run-7656a2e6300b9902",
+          "reason": "collect: all checks passed"
         }
       ]
+    },
+    "T1217": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，P13 第二笔）：两件事同一处收工校验。一是 `#264`——`worker_collect.go:297` 收 `RESULT.json` 时全文没有与 `rec.StartedAt` 的比较，而 `ReworkWorker`（`worker_spawn.go:1063`）/`RespawnWorker`（`:1086`）重用同一任务目录、`archivePreviousVerdict`（`review_worker.go:689`）只服务评审路径，于是一轮没写过 `RESULT.json` 的返工会被收成绿的。二是 ㊾ 带出的：`result_consistency.go:159-166` 无条件要求 `completed` 下所有 `acceptance[]` 是 `passed`，而 schema 的枚举含 `not_applicable`，`system.md` 却只把这条规矩说给了 `tests[]`——Worker 照 schema 写就被拒，正文里没人告诉它。修法已定：不放宽 collect、不改 schema，把规矩写进正文。`v1_required=false`：这是流水线加固，不是产品交付。G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已与 T1215 一起抄进 `dependencies`）。"
     }
   },
   "version": 2

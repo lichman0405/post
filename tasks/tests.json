@@ -1850,6 +1850,16 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1217-TEST-01",
+      "task_id": "T1217",
+      "name": "a stale RESULT.json from an earlier round is not collected as this round's",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

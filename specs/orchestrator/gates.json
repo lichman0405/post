@@ -1197,6 +1197,11 @@
       "g3_jobs": [
         "gitea-real-services"
       ]
+    },
+    "T1217": {
+      "g3_jobs": [
+        "mof-canonical"
+      ]
     }
   }
 }
