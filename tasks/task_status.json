@@ -11990,8 +11990,90 @@
       ]
     },
     "T1214": {
-      "status": "todo",
-      "notes": "新立账（2026-09-23，owner 五条 L3 裁定之后）：证书的最后一次重钉——Gate G 按范围豁免改判，§0 五条裁定逐条点名，㊺ §4 的四条记实错误一并订正。任务书见 tasks/packages/T1214.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false：这是证书的修订，不是产品交付。"
+      "status": "merged",
+      "started_at": "2026-09-23T12:30:52Z",
+      "notes": "新立账（2026-09-23，owner 五条 L3 裁定之后）：证书的最后一次重钉——Gate G 按范围豁免改判，§0 五条裁定逐条点名，㊺ §4 的四条记实错误一并订正。任务书见 tasks/packages/T1214.json，G3 覆盖同笔补进 gates.json（mof-canonical）。v1_required=false：这是证书的修订，不是产品交付。",
+      "worker_run_id": "run-02951ee0082f2597",
+      "accepted_by_supervisor_at": "2026-09-23T13:09:15Z",
+      "merged_at": "2026-09-24T00:36:13Z",
+      "rejection_reason": "# T1214 第 3 轮返工：只改两处（都是「记录与实物对不上」这一类）\n\n你上一轮交的东西**已经通过我这边的独立 G2**（我在一棵干净树上跑 `tests/acceptance/v1-final-audit.sh`\n得 rc=0、`AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped,\n0 passed-without-evidence)`），交付的哈希也对得上（报告\n`***`、脚本\n`***`，我自己在工作树上\n`sha256sum` 量的）。**别把通过的东西推倒重做。**\n\n叫回来的原因只有一个：这份证书立身的东西就是「记录里写的，实物上要能对上」，\n而**交上来的这一版里还有两处对不上**，两处都是**数字/说法**，不是结论。\n\n---\n\n## 一、§6.0(c) 末句那个括号说的方法是错的\n\n**原文（`:1370`，逐字）**：\n\n> 三个方向的实跑证明（同一份 `/tmp` 副本上做，树里不留痕）见 6.0(e)。\n\n**我核到什么**：你这一版 §6.0(e) 的「先说方法」一段（`:1381` 起）逐字说，那几条证明是在**同一棵工作树**\n上「原地改、当场还原」，备份放在 `/tmp/t1214-report-backup.md`，并且明写「**没有在 `/tmp` 里另建一棵树\n去跑**」；证明 1、证明 2 的原文也是这个做法（「已把 :80 的…改成」+「从 /tmp/t1214-report-backup.md\n整份还原」）。两句话只能有一句对，**对的是 (e)，括号里那句是错的**。\n\n**你要做什么**：把那半个括号改成与你这一版**实际做法**一致的表述（例如「在同一棵工作树上原地改、\n当场还原，方法见 6.0(e)」），或者干脆只留「见 6.0(e)」。**同一行内替换，不许增行删行。**\n\n**顺带核过的、不要动的**：同一句里的「**三个方向**」我数过，指的是 (e) 里的证明 2 / 证明 3 / 证明 4\n（判定与统计不一致 → 红；说 1 条未通过却不点名 → 红；点错门名 → 红），数得出三条，**保留**。\n\n## 二、§6.0(e)「清扫二」里三处行号是旧读数（你上轮自己记过这件事）\n\n**报告怎么写的**：粘贴的那段 `awk | grep -n` 输出里是 `685:` / `688:` / `693:` / `1106:` / `1108:`，\n下面那句散句也写「（`:685` / `:688` / `:693`）」「（`:1106` / `:1108`）」。\n\n**我在工作树上实测的（就是你交付的这一份）**：\n\n```\n$ awk '/^#### \\(e\\)/{exit} {print}' tests/acceptance/v1-final-report.md | grep -n \"request-upload\"\n685:    端点」，那描述的是**裁定之前**的树）：`grep -n \"request-upload\" specs/api/openapi.yaml`\n688:    `grep -n \"request-upload\" tests/acceptance/v1-final-report.md` 在**报告主体**（不含 §6.0(e)\n694:  - 产品代码里从来没有实现：`grep -Rn \"request-upload\\|requestUpload\" cmd/api internal` 输出为空。\n1107:grep -n \"request-upload\" specs/api/openapi.yaml || echo \"zero hits in specs/api/openapi.yaml\"\n1109:grep -Rn \"request-upload\\|requestUpload\" cmd/api internal || echo \"zero hits in cmd/api and internal\"\n```\n\n**后三个各差 1**：`693`→**`694`**、`1106`→**`1107`**、`1108`→**`1109`**（`685`、`688` 是对的）。\n你在 RESULT 的 risk[8] 里自己记下了这件事、并且说明是为了守我上一轮「只许动九处」的约束才没改——\n**这个判断是对的，那一轮就该那样做；这一轮我把这三处数字放开，改掉它。**\n\n**你要做什么**：**先改上面第一条，再重跑这条命令**，以重跑出来的实测值为准，把粘贴块里的三处行号与\n散句里的三处行号一起改对；**块里那 5 行内容逐字保留**（内容是对的），只动行号。**同一行内替换。**\n\n> 为什么先改后量：这两处编辑都在 `#### (e)` 这一行**之上**（`:1370` 与 `:1510` 附近），\n> 而你那条 `awk` 正是停在 `#### (e)`——所以改完再量，数字不会因为这次编辑再变。前提是**行数不变**。\n\n---\n\n## 三、这一轮的硬线\n\n1. **只改这两处**，别的一个字都别动：尤其不许动 `:311`、不许动审计脚本\n   （`tests/acceptance/v1-final-audit.sh` 这一轮**应当保持 `c6ae3181…` 不变**）、\n   不许动 (e) 里五条证明的结论与 (d)/(b)/(a) 的正文。\n2. **整份报告的行数必须与这一版相同**（改前改后 `wc -l` 相等）——两处都是行内替换，做得到。\n   行数一变，报告里其他自引的数字（含 (e) 末尾那段自指）就会跟着过期。\n3. 改完在树里跑 `bash tests/acceptance/v1-final-audit.sh`，必须 **rc=0、末行 `AUDIT OK: …`**。\n4. 报告自身哈希会变 → **RESULT 里记的那一组哈希要重取重记**（含「备份/还原后两次 `sha256sum`\n   相等且等于交付这一份」那一组）。报告**不要**自引自己的哈希（现在没有，保持没有）。\n5. 报告里凡是这一轮被这两个改动碰到的自引数字（例如整份文件里 `request-upload` 的命中数），\n   **重跑一遍确认**；变了就改，没变就别动。\n6. RESULT 里逐字写清：这一轮改了哪几行、每处改前/改后的原文、跑出来的一手输出、以及交付两个文件的 sha256。\n7. **树要干净**：`git status --porcelain` 只列 `tests/acceptance/v1-final-report.md`\n   （`tests/acceptance/v1-final-audit.sh` 应当无改动）；不留临时文件、不留后台进程。\n\n这一轮是极小改动，做完就停，别顺手润色别的段落。\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-09-23T11:24:26Z",
+          "run_id": "run-45de54cbf15cf10e"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-09-23T11:24:29Z",
+          "run_id": "run-385fee54b832fbc2",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-23T11:42:59Z",
+          "run_id": "run-33e2ab2aacce0237",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-23T11:51:46Z",
+          "run_id": "run-5605f2a8c5cba2f9",
+          "reason": "# T1214 返工（本会话第二次交付）：只订正两句话，别的一律不动\n\n你的 diff 我逐行看过了。**脚本那一半成立**（`GATE_TITLES` + 位置配对 + 两向实证；我另在 /tmp 的副本上独立跑过：删一条 `**裁定**：` 行 → 红且输出「names 5 L3 label(s) but carries 4 ruling line(s)」；把第 8 条处置行改成 `未通过` → 红且要求「…1 条「未通过」（Gate H）」；把第 1 条改成 `未通过` → 红且点名 Gate A；把 HEAD 挪离基准 → 红「报告的基准不是这棵树」；真报告 → 绿）。报告第 0 节的五条、第 5.3 节的统计句、第 6.0/6.1 节的分轮说明、§6.2 那一格的三笔归因，也都成立。**这些一个字都不许再动。**\n\n返工只做下面两处。两处都是「记实」问题——正是这个任务存在的理由那一类。\n\n## 1. §6.8 「Gate H 的 H4 行」那一格的引文不是逐字\n\n你现在的写法：「（原文写「T1212 改了 `Makefile` 顶部的 `GO_UNIT_PKGS`，那一行整体下移 13 行」）」。\n\n**先把事实自己量一遍，别信我**：\n\n- `git show 91ed2d5:tests/acceptance/v1-final-report.md | sed -n '1230p'` → 这是那一格上一版的原文，抄下来。\n- `for r in 9b22339e b6c1fb1a 115a4286 a8850f51 91ed2d5; do printf '%s ' $r; git show ${r}:Makefile | grep -n '^a11y:' | cut -d: -f1; done` → 看 `a11y:` 自己动了几行。\n- `for r in 9b22339e b6c1fb1a 115a4286 a8850f51 91ed2d5; do printf '%s ' $r; git show ${r}:Makefile | grep -n '^dev:' | cut -d: -f1; done` → 同一读法量 H4 真正讲的那一行。\n\n读数出来之后照实写：\n\n- **引文必须逐字**（含原文点名的那一行目标）。你上一轮把原文里的目标名换成了「那一行」——引文声称是原文，却不是原文，而且换掉的正是任务书第 6 条 ①(a) 要你处置的那个对象：读者从此看不出上一版点的是谁，也看不出你判过它。\n- 把这一格的判读写全：这一行讲的是 H4 = `make dev`；上一版那句话点的是哪一个目标；**那个目标自己实测下移了几行**（你自己的读数）。若两份读数一致（`dev:` 与上一版点名的那个目标各下移同样的行数），就照实写「上一版的**数**没错，错的是**归因**：13 行整笔记给 T1212」——与你已经写好的 T1209 +10 / T1212 +3 那半对齐。**不要**为了对上任务书里 ①(a) 的说法而造一个读数出来；以你量到的为准，量到与任务书不符就写清不符在哪（这正是任务书第 1 条要求的）。\n- 已经写对的逐笔归因（T1209 `034a341` +10、T1212 `a8850f5` +3）、`security-tools:` 那一组同步读数、「移了 13 行是对的」这个结论，都保留。\n\n## 2. §2 「Gate H 的 H4 行」正文里的「本版」串轮了——而这一行任务书原本要求不要改\n\n任务书第 6 条 ① 写着：**「`:311`（Gate H 的 H4 行正文）不要改」**。你改了它。改后的句子是：\n\n> **本版把行号从 `:324` 改成 `:337`，并把「为什么移了 13 行」的归因改对**\n\n两件事被并进一个「本版」，而报告自己的约定里「本版」只有一个所指。自己核：\n\n- `git show 91ed2d5:tests/acceptance/v1-final-report.md | grep -n '一律按这个说法标注' -A2` → 基线报告里「本版」= 第八轮（它的 §6.1 写「树：`a8850f51…`」）。\n- 你交付的报告里同一处（§6.0(a) 的 SHA 对照表）写的是「**`91ed2d5` = 本版（第九轮）基准**」。所以在你这一版正文里，「本版」= 第九轮。\n- `git show a8850f51:tests/acceptance/v1-final-report.md | grep -m1 '^| H4 '` 与 `git show 91ed2d5:tests/acceptance/v1-final-report.md | grep -m1 '^| H4 '` 对照 → 行号 `:324 → :337` 是**第八轮**改的（它自己那句「本版把行号从…」说的是它自己），**第九轮没改过这个行号**，第九轮只改了归因。\n\n于是这句话在两种读法下都不成立。二选一，你决定（L1）：\n\n- **(甲)** 把主语改准：行号变更记在第八轮名下，本版只认「把归因改对」那一半；或\n- **(乙)** 把这一行**恢复成基线原文**（`git show 91ed2d5:tests/acceptance/v1-final-report.md` 的第 311 行整行照抄），把订正全部留在 §6.8——这正是任务书原本要求的形态。\n\n无论选哪个，这一行改完必须自洽：出现「本版」的地方，指的就是第九轮真做过的事。\n\n## 3. 收尾要求\n\n- 改完跑 `bash tests/acceptance/v1-final-audit.sh`，退出码必须是 0；把输出末行原文写进 RESULT。\n- RESULT 里为上面两处各写「读了哪一行 / 跑了哪条命令 / 看到什么」，并**明确写出 §2 那一行被改过**（上一轮的 RESULT 没写这件事，只说了两处一起改归因）。\n- **只许动这两处**（外加 RESULT）。其余 diff 我按已复核处理：不许重写、不许顺手改别的数字、不许动台账 `tasks/tests.json`、不许动 `docs/**` `specs/**`。\n- 收工前把树弄干净：`git status --porcelain -uall` 只许列 `tests/acceptance/**` 内你有意改的文件；不留任何进程。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-23T12:03:56Z",
+          "run_id": "run-71a78c6342d9625c",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-23T12:17:37Z",
+          "run_id": "run-c976e96ce287876a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-09-23T12:21:09Z",
+          "run_id": "run-20c3f5f3357162e6",
+          "reason": "# T1214 第 3 轮返工：只改两处（都是「记录与实物对不上」这一类）\n\n你上一轮交的东西**已经通过我这边的独立 G2**（我在一棵干净树上跑 `tests/acceptance/v1-final-audit.sh`\n得 rc=0、`AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped,\n0 passed-without-evidence)`），交付的哈希也对得上（报告\n`***`、脚本\n`***`，我自己在工作树上\n`sha256sum` 量的）。**别把通过的东西推倒重做。**\n\n叫回来的原因只有一个：这份证书立身的东西就是「记录里写的，实物上要能对上」，\n而**交上来的这一版里还有两处对不上**，两处都是**数字/说法**，不是结论。\n\n---\n\n## 一、§6.0(c) 末句那个括号说的方法是错的\n\n**原文（`:1370`，逐字）**：\n\n> 三个方向的实跑证明（同一份 `/tmp` 副本上做，树里不留痕）见 6.0(e)。\n\n**我核到什么**：你这一版 §6.0(e) 的「先说方法」一段（`:1381` 起）逐字说，那几条证明是在**同一棵工作树**\n上「原地改、当场还原」，备份放在 `/tmp/t1214-report-backup.md`，并且明写「**没有在 `/tmp` 里另建一棵树\n去跑**」；证明 1、证明 2 的原文也是这个做法（「已把 :80 的…改成」+「从 /tmp/t1214-report-backup.md\n整份还原」）。两句话只能有一句对，**对的是 (e)，括号里那句是错的**。\n\n**你要做什么**：把那半个括号改成与你这一版**实际做法**一致的表述（例如「在同一棵工作树上原地改、\n当场还原，方法见 6.0(e)」），或者干脆只留「见 6.0(e)」。**同一行内替换，不许增行删行。**\n\n**顺带核过的、不要动的**：同一句里的「**三个方向**」我数过，指的是 (e) 里的证明 2 / 证明 3 / 证明 4\n（判定与统计不一致 → 红；说 1 条未通过却不点名 → 红；点错门名 → 红），数得出三条，**保留**。\n\n## 二、§6.0(e)「清扫二」里三处行号是旧读数（你上轮自己记过这件事）\n\n**报告怎么写的**：粘贴的那段 `awk | grep -n` 输出里是 `685:` / `688:` / `693:` / `1106:` / `1108:`，\n下面那句散句也写「（`:685` / `:688` / `:693`）」「（`:1106` / `:1108`）」。\n\n**我在工作树上实测的（就是你交付的这一份）**：\n\n```\n$ awk '/^#### \\(e\\)/{exit} {print}' tests/acceptance/v1-final-report.md | grep -n \"request-upload\"\n685:    端点」，那描述的是**裁定之前**的树）：`grep -n \"request-upload\" specs/api/openapi.yaml`\n688:    `grep -n \"request-upload\" tests/acceptance/v1-final-report.md` 在**报告主体**（不含 §6.0(e)\n694:  - 产品代码里从来没有实现：`grep -Rn \"request-upload\\|requestUpload\" cmd/api internal` 输出为空。\n1107:grep -n \"request-upload\" specs/api/openapi.yaml || echo \"zero hits in specs/api/openapi.yaml\"\n1109:grep -Rn \"request-upload\\|requestUpload\" cmd/api internal || echo \"zero hits in cmd/api and internal\"\n```\n\n**后三个各差 1**：`693`→**`694`**、`1106`→**`1107`**、`1108`→**`1109`**（`685`、`688` 是对的）。\n你在 RESULT 的 risk[8] 里自己记下了这件事、并且说明是为了守我上一轮「只许动九处」的约束才没改——\n**这个判断是对的，那一轮就该那样做；这一轮我把这三处数字放开，改掉它。**\n\n**你要做什么**：**先改上面第一条，再重跑这条命令**，以重跑出来的实测值为准，把粘贴块里的三处行号与\n散句里的三处行号一起改对；**块里那 5 行内容逐字保留**（内容是对的），只动行号。**同一行内替换。**\n\n> 为什么先改后量：这两处编辑都在 `#### (e)` 这一行**之上**（`:1370` 与 `:1510` 附近），\n> 而你那条 `awk` 正是停在 `#### (e)`——所以改完再量，数字不会因为这次编辑再变。前提是**行数不变**。\n\n---\n\n## 三、这一轮的硬线\n\n1. **只改这两处**，别的一个字都别动：尤其不许动 `:311`、不许动审计脚本\n   （`tests/acceptance/v1-final-audit.sh` 这一轮**应当保持 `c6ae3181…` 不变**）、\n   不许动 (e) 里五条证明的结论与 (d)/(b)/(a) 的正文。\n2. **整份报告的行数必须与这一版相同**（改前改后 `wc -l` 相等）——两处都是行内替换，做得到。\n   行数一变，报告里其他自引的数字（含 (e) 末尾那段自指）就会跟着过期。\n3. 改完在树里跑 `bash tests/acceptance/v1-final-audit.sh`，必须 **rc=0、末行 `AUDIT OK: …`**。\n4. 报告自身哈希会变 → **RESULT 里记的那一组哈希要重取重记**（含「备份/还原后两次 `sha256sum`\n   相等且等于交付这一份」那一组）。报告**不要**自引自己的哈希（现在没有，保持没有）。\n5. 报告里凡是这一轮被这两个改动碰到的自引数字（例如整份文件里 `request-upload` 的命中数），\n   **重跑一遍确认**；变了就改，没变就别动。\n6. RESULT 里逐字写清：这一轮改了哪几行、每处改前/改后的原文、跑出来的一手输出、以及交付两个文件的 sha256。\n7. **树要干净**：`git status --porcelain` 只列 `tests/acceptance/v1-final-report.md`\n   （`tests/acceptance/v1-final-audit.sh` 应当无改动）；不留临时文件、不留后台进程。\n\n这一轮是极小改动，做完就停，别顺手润色别的段落。\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-09-23T12:30:52Z",
+          "run_id": "run-02951ee0082f2597",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-09-23T12:38:23Z",
+          "run_id": "run-d8fdf85359e871d8",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-09-23T13:09:15Z",
+          "run_id": "run-9a615a374b410be6"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-09-24T00:36:13Z",
+          "run_id": "run-3fc5d70ab80d8066",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     }
   },
   "version": 2
