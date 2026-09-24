@@ -1830,6 +1830,16 @@
       "status": "passed",
       "last_run": "2026-09-24T00:37:56Z",
       "evidence": "Supervisor ran `bash tests/acceptance/v1-final-audit.sh` -> exit 0 on 2026-09-24T00:37:56Z. Last output: COUNTS tests_skipped=0 ; COUNTS tests_blocking=183 ; ``` ; AUDIT OK: report markers present, counts match (0 unmerged, 1 not_run, 0 failed, 0 skipped, 0 passed-without-evidence). 在证书自己钉住的基准 91ed2d5 的工作树上、放入本版交付的 tests/acceptance/** 后跑（交付文件取自本版合并后的 origin/main，PR #361 → 8f393bb）；负对照（同样这些文件放在 HEAD=67d60fb 的树上）→ rc=1「FAIL: 报告的基准不是这棵树。」。两份日志：/tmp/t1214-g2-20260924/pin.log 与 other.log。"
+    },
+    {
+      "id": "T1215-TEST-01",
+      "task_id": "T1215",
+      "name": "worker stop leaves no live reaper",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

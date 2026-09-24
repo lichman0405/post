@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 156,
+  "task_count": 157,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -14,7 +14,8 @@
     "P9": "Search 与 Evidence-backed Research Answer",
     "P10": "Research Events、订阅与 Impact Analysis",
     "P11": "UI、安全、可访问性、性能与运维加固",
-    "P12": "Canonical Workflow 与最终交付"
+    "P12": "Canonical Workflow 与最终交付",
+    "P13": "V1 之后的加固：流水线自己的可信度"
   },
   "tasks": [
     {
@@ -8969,6 +8970,75 @@
       ],
       "scope_note": "**这一笔是证书的最后一次重钉，也是 V1 完成声明前的最后一笔。** T1210 立起了证书与校验器，T1211/T1212 改了它们要度量的东西，T1213 把证书重钉到承载它们的树上；owner 2026-09-23 的五条 `L3` 裁定（`tasks/decisions.md` ㊻，落地提交 `90167ba`）**改变了 Gate G 的判定依据**，所以证书必须再出一版：**Gate G 由「未通过」改判为「范围豁免」，10 条 Gate 全部通过**。这一版同时把 ㊺ §4 记下的四条记实错误订正掉——证书反正要重生成，四条不该为它们单跑一轮管线。`v1_required=false` 是刻意的（同 T1210/T1213）：这是**证书的修订**，不是产品交付；标 true 会让报告必须具名排除「正在写修订的自己」，排除名单每刷一版长一节——那是记账技巧不是严格。**依赖两笔**：`T1210`（被修订的证书本体与校验器）与 `T1213`（上一版重钉，本版在它的基础上继续）。**G3 给 `mof-canonical`**（与 T1210/T1213 同一作业）：证书里最吃重的跨边界断言是 Gate I 的 MOF 全闭环，它必须在**承载这一版的树上**重新挣得；安全门那一半由 `security-master` 作业负责，它已是必需 CI 作业、也在 G2 的 `runs_jobs` 里，所以不重复列为 G3。**为什么 `docs/**` 在禁止面**：裁定写在 `docs/02` 等规格里（Supervisor 的面），报告是**对规格的答复**；允许被验收者改规格等于让考生改卷子——同一口径已用在 T1206/T1208/T1210/T1211/T1213 上。",
       "supervisor_scope_narrowing": "**为什么只给 `tests/acceptance/**`**：这一笔的产物就是那两份文件（报告 + 校验器），它们是同一件东西的正反面——报告写什么，校验器就得能验什么；给这两份文件以外的任何写入面，都会让「证书」与「被证之物」之间的边界糊掉。**为什么 `tasks/**` 连只读也写进禁止面**：校验器要**读**台账（数条数、数空 evidence），读是必须的、写是越界的——写明白这一条，好让「我数了一下」与「我改了一下」分得清。**为什么 `specs/**` 在禁止面**：五条裁定的落地（含契约删两条端点、`tools.json` 的 `scope` 标记）已经由 Supervisor 按 §8.1 做完（提交 `90167ba`）；Worker 不写 `specs/**` 是这套流水线从第一天起的规矩。"
+    },
+    {
+      "id": "T1215",
+      "phase": "P13",
+      "phase_name": "V1 之后的加固：流水线自己的可信度",
+      "title": "退出时序：让 `exit.status` 的含义与读它的仪器对齐，收掉那个 1 秒窗口（#243 / #207 / #133）",
+      "v1_required": false,
+      "dependencies": [
+        "T1202"
+      ],
+      "tests": [
+        "worker stop leaves no live reaper",
+        "rejection-retry e2e waits on the recorded exit"
+      ],
+      "allowed_scope": [
+        "internal/devorchestrator/**",
+        "cmd/rddev/**",
+        "tests/acceptance/four-gate-helpers.sh",
+        "tests/acceptance/rejection-retry-e2e.sh"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "services/**",
+        "infra/**",
+        "ops/**",
+        "scripts/**",
+        "Makefile",
+        "tests/security/**",
+        "tests/acceptance/gitea-real-services-e2e.sh",
+        "tests/acceptance/v1-final-report.md",
+        "tests/acceptance/v1-final-audit.sh"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+        "docs/67_TEST_GATES.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "requirements": [
+        "**先读再写，别照抄我的话**（我在这类引用上错过不止一次）。三个缺陷描述的是**同一个 1 秒窗口**：`run-worker.sh` 里 `echo \"$code\" > \"$statusfile\"` 在 `internal/devorchestrator/worker_guard.go:168`，而同一脚本 `:186` `kill -TERM -- \"-$pid\"`、`:187` `sleep 1`、`:188` `kill -KILL -- \"-$pid\"` 都在它**之后**。所以「exit.status 已经存在」**不蕴含**「机器已经走干净」。下面每一条都给了出处，先到树里核一遍；核出来与我说的不一样，以树为准并在 RESULT 里写明。",
+        "**（正题）先把这个窗口的修法想清楚，别急着挪那一行。** 写入位置**不是随手排的**——紧挨着它的注释（`worker_guard.go:172-174`）逐字写着「The exit code is on disk BEFORE this runs, so a cleanup that fails can never cost the record of how the Worker ended.」：先落盘是为了**让退出记录不怕收尾失败**。因此「把写入挪到 kill 序列之后」会拿掉这条保证（kill 悬挂或失败就没有退出码了），**不是免费的**。你的 L1 决定，但必须显式权衡这两件事（记录的耐久性 vs 「文件存在 ⇒ 收尾完成」），并让没被你选中的那一侧**不再留同样的窗口**：给出 `grep -rn 'exit.status' --include='*.go' --include='*.sh' .` 的**全量命中**与逐处处置（哪些等文件、哪些等进程、哪些只是读值）。",
+        "**`worker_proc.go` 那段注释是错的，而它是有承重的。** `internal/devorchestrator/worker_proc.go:260-264` 说 reaper「writes exit.status as its last act」，并以此为理由让 `sessionResidue`（`:266`）把「正在退出的 reaper」排除在残留之外。按第 1 条，reaper 在写完文件之后**还要活约 1 秒**。按你选定的时序把它改对；**并且说明 `sessionResidue` 排除它到底还成不成立**——若成立，凭什么（现在是拿一句错的时序当理由）。",
+        "**#207：等待器与收集器必须等同一个事实。** `tests/acceptance/four-gate-helpers.sh:150-158` 的 `fg_wait_exit` 只轮询**文件在不在**（`:153` `[ -f \"$repo/.rddev/workers/$task/exit.status\" ]`），而 `internal/devorchestrator/review_worker.go:377` 要的是 `rec.ExitStatus != nil`，那个字段由 `reconcileWorker`（`internal/devorchestrator/worker_registry.go:249`）在判定进程已经没了之后才写。于是同一时刻两句话可以互相矛盾（原件：`.rddev/runtime/gates/T0204/output/run-d5229458d640234c-g2/acceptance/01.log`；议题 #207 记了 `main` 在 `d4df859` 上红过一次、原样重跑就绿）。**给出最小复现**，然后让两者等同一个事实。**不许**靠放大 timeout 或加 `sleep` 把窗口盖住——「一个会随机说不的仪器，和不会说不的仪器一样不可信」（#240 里的原话）。",
+        "**#133：`review spawn` 的退出码要有解释。** 副作用全部落地（归档、清空 `RESULT.json`、后续 collect 拒绝那次没有 verdict 的运行——三条都过了），而 `review spawn` 返回 1（原件同上；`tests/acceptance/rejection-retry-e2e.sh:271` 断言的期望值是 0）。**那一次运行的 stderr 不在日志里，这正是它悬着的原因**——先把它找出来。然后二选一，由证据决定：若是**合法拒发**，改脚本的期望值并说清拒的是什么；若是**做完了却报失败**，改 `review spawn`。两条路都行，但要说清哪条、凭什么。",
+        "**三处都要有能红的证明。** 每一处给出「改前会红、改后绿」的**两次**输出；只给绿的不算。构造必须是**受控的**（例如一个能在文件出现后仍存活 1 秒的假 reaper、或一个受控的慢），不许靠碰运气重跑。",
+        "**不许为了让闸变绿而动仪器本身。** `tests/acceptance/v1-final-report.md` 与 `tests/acceptance/v1-final-audit.sh` 是 V1 证书与其校验器，**一个字节都不许碰**（收工前给出两份的 `sha256sum`）；`scripts/**` 是验收仪器（`record_test_run.py` / `validate_specs.py` / `spec_version.py`），不在范围内；`gates.json` / `ci.yml` 的作业定义一个字不动。"
+      ],
+      "deliverables": [
+        "`internal/devorchestrator/**` 与 `cmd/rddev/**` 里的时序或等待逻辑修正（含 `worker_guard.go` 的 reaper 脚本生成、`worker_proc.go:260-264` 那段注释、`worker_stop.go` 的等待条件、以及你判定需要同步的读侧）。",
+        "`tests/acceptance/four-gate-helpers.sh` 与 `tests/acceptance/rejection-retry-e2e.sh` 的等待/断言修正。",
+        "一条**新的**能被反证的测试或 e2e 构造，它证明「文件已出现但收尾未完成」这个状态不会再被当成完成——放在 `internal/devorchestrator/**` 或 `cmd/rddev/**` 里，随 `go test` 跑。",
+        "`RESULT.json`：上面每一条的「读了哪一行 / 跑了哪条命令 / 看到什么」，含 `grep -rn 'exit.status'` 的全量命中与逐处处置、红绿两次输出原文、两份证书文件的 sha256。"
+      ],
+      "acceptance_criteria": [
+        "**窗口在新代码里造不出来了**：构造「exit.status 已存在、但收尾尚未完成」的状态，新逻辑**不**把它当完成（贴出这一条的构造与输出）；再证明正常完成路径照样放行。",
+        "**`TestWorkerStop` 的原始症状不再可能**：证明测试进程结束时**没有任何**以那个被删临时目录为 cwd 的存活进程。给出你用的那条命令与输出（`ls -l /proc/*/cwd` 按 cwd 过滤，或等价做法）。",
+        "`go test -count=1 ./cmd/rddev/... ./internal/devorchestrator/...`（**必须 `-count=1`**，Go 不追踪测试缓存之外的输入）退出码 0，原文进 RESULT。",
+        "**`rejection-retry-e2e` 在慢的情况下也绿**：用受控的慢（可配置延迟或假 reaper）造出**旧代码会红、新代码会绿**的那一次，红绿两次输出都贴出来；`bash tests/acceptance/rejection-retry-e2e.sh` 本身退出码 0。",
+        "`grep -rn 'exit.status' --include='*.go' --include='*.sh' .` 的每一处命中都在 RESULT 里被点过名并给出处置（等文件 / 等进程 / 只读值），没有一处是「没管」。",
+        "**没有越界**：`git status --porcelain -uall` 只列 `allowed_scope` 内的路径；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`scripts/**`、`Makefile` 一个字节未动（给出为空的 `git diff --stat HEAD -- <那些路径>` 原文）；`tests/acceptance/v1-final-report.md`（`92cb6c19…`）与 `v1-final-audit.sh`（`c6ae3181…`）的 `sha256sum` 与交付前一致；无残留进程。"
+      ],
+      "scope_note": "这一笔是**流水线自己的可信度**，不是产品功能，所以 `v1_required` 为 false：V1 证书（`tests/acceptance/v1-final-report.md` 与它的校验器）钉在它自己那棵树上，不依赖它，它也不改任何产品语义、权限模型或科研语义。它修的是**每笔任务的必过作业**——`#243` 挡的是 `go`（required），`#207`/`#133` 挡的是 `acceptance`（required），所以它自己的验收也可能被它要修的那个偶发红拦下；真遇到时按 `rddev` 的记录重跑，**不许**放宽任何断言。",
+      "supervisor_scope_narrowing": "**为什么把两个验收脚本单独写进 `allowed_scope` 而不是给 `tests/acceptance/**`**：这个目录里还躺着 V1 证书（`v1-final-report.md`）、它的校验器（`v1-final-audit.sh`）与 `gitea-real-services-e2e.sh`（那是 #240 的面，另有任务）——整目录放开会让这三样都变成可写，而它们要么不能被改（证书钉在 `91ed2d5`），要么会把两笔任务的冲突面糊在一起。逐一列出要改的两个文件，边界才是可核的。**为什么 `scripts/**` 不在范围内**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py` / `validate_task_state.py`），让被验收者改卷子等于让考生改分——同一口径在 T1211 与 T1204 用过。**为什么 `gates.json` / `ci.yml` 不在范围内**：作业定义与「哪几个作业是 required」是验收判据的来源，改判据不在实现任务的范围里；若你判断必须改，在 RESULT 里点名说清楚，我来接。**为什么允许碰 `cmd/rddev/**` 的测试**：`#243` 的症状就出在 `cmd/rddev/worker_test.go` 的 `TestWorkerStop`，修法可能落在测试的收尾等待上，不收进来会让工人为了一个测试文件报 blocked。"
     }
   ]
 }

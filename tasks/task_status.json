@@ -1,5 +1,5 @@
 {
-  "overall": "P12_in_progress",
+  "overall": "P13_in_progress",
   "tasks": {
     "T0000": {
       "status": "merged",
@@ -12074,6 +12074,10 @@
           "reason": "pr merge via rddev (four gates green)"
         }
       ]
+    },
+    "T1215": {
+      "status": "todo",
+      "notes": "新立账（2026-09-24，V1 完成之后的第一笔）：#243 / #207 / #133 三条议题描述的是同一个 1 秒窗口——`run-worker.sh` 先写 `exit.status`（`worker_guard.go:168`）再做 kill 序列（`:186`-`:188`），于是「文件存在」不蕴含「收尾完成」。任务书见 `tasks/packages/T1215.json`，G3 覆盖同笔补进 `specs/orchestrator/gates.json`（`mof-canonical`，其 `requires_tasks` 为 `T1202`，已抄进 `dependencies`）。`v1_required=false`：这是流水线加固，不是产品交付，V1 证书不依赖它。"
     }
   },
   "version": 2

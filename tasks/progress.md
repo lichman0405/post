@@ -3246,9 +3246,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-24T00:38:17Z
+生成时间：2026-09-24T00:59:57Z
 
-状态分布：todo 0 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 156（合计 156/156 个任务）
+状态分布：todo 1 · ready 0 · running 0 · worker_failed 0 · verification 0 · rejected 0 · blocked 0 · accepted 0 · merged 156（合计 157/157 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3408,5 +3408,6 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1212 | 让「需要真库」的 e2e 测试在 CI 里不再静默跳过（把跳过变成可判的失败） | P12 | merged | 2026-09-22T23:12:52Z |  | 2026-09-23T00:28:04Z | 2026-09-23T00:59:12Z |
 | T1213 | 把 V1 证书在最终树上重钉一次：Gate H 在 T1211 的新安全仪器上重挣，返工轮已处置的四处逐条复核 | P12 | merged | 2026-09-23T03:20:22Z |  | 2026-09-23T03:50:13Z | 2026-09-23T04:03:24Z |
 | T1214 | 按五条 L3 裁定把 V1 证书做最后一次重钉：Gate G 改判为范围豁免，四条记实错误一并订正 | P12 | merged | 2026-09-23T12:30:52Z |  | 2026-09-23T13:09:15Z | 2026-09-24T00:36:13Z |
+| T1215 | 退出时序：让 `exit.status` 的含义与读它的仪器对齐，收掉那个 1 秒窗口（#243 / #207 / #133） | P13 | todo |  |  |  |  |
 
 <!-- AUTO-PROGRESS:END -->

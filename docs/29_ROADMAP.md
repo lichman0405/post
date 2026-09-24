@@ -41,3 +41,10 @@ Primer consistency、a11y、rate limit、observability、performance。
 
 ## P12 — Canonical E2E / Deployment
 MOF 完整开放研发闭环、backup/restore、staging/prod runbook、Master Acceptance。
+**已交付**：V1 完成声明于 2026-09-24 成立（`tasks/decisions.md` ㊼ §7 的四条判定，证书 `tests/acceptance/v1-final-report.md`）。
+
+## P13 — V1 之后的加固：流水线自己的可信度
+V1 交付之后，仓库里剩下的是**欠账**而不是功能：流水线为了自己的诚实度必须先可信——挡着每笔任务必过作业
+的偶发红（`#243` 的临时目录清理竞态、`#207`/`#133` 的退出状态窗口、`#240` 的 Gitea bootstrap 竞态），
+然后是安全与数据完整性缺陷。这一阶段**不改产品语义**，也不在 V1 证书的判定范围内
+（证书钉在它自己那棵树上，见 `tests/acceptance/v1-final-report.md:56-62`）。
