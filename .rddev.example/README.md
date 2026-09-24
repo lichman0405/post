@@ -34,18 +34,30 @@ It is driven by Claude Code as a PreToolUse hook (`worker-settings.json`) and
 enforces:
 
 - git control-plane subcommands blocked in **command position only**
-  (`echo "git commit"` and `grep "push" file` are not matches);
+  (`echo "git commit"` and `grep "push" file` are not matches). Every
+  separator the shell honours starts a new command position — `;`, `|`, `&&`,
+  `||`, `&` and a newline — so the same verb on a second line is refused
+  exactly as it is on the first (T1221: the command text is JSON-decoded, so
+  the `\n` of a multi-line command reaches the tokenizer as a newline);
 - gh/glab/tea CLIs and sudo/su/doas/pkexec blocked;
 - Docker socket access blocked except version queries, unless the task was
   spawned with `--docker` (POST_WORKER_DOCKER_GRANT=1);
-- file reads confined: credential stores, `.env` files (except
-  `.env.example`) and other Workers' runtime state blocked;
+- file-tool reads confined: credential stores, `.env` files (except
+  `.env.example`) and other Workers' runtime state blocked for Read/Grep/
+  Glob/NotebookRead (and for the file-writing tools, which read what they
+  change). The guard decides on the command TEXT, so what a *shell* command
+  reads is not inspected (`cat ~/.ssh/id_rsa` passes the hook) — the limit the
+  Worker contract states in the same words;
 - writes confined to the Worker's own worktree, its result dir and `/tmp`,
   whichever tool makes them — shell writes (rm/cp/mv/ln/install/tee,
   `>`/`>>` redirections) and the file-writing tools (Write/Edit/MultiEdit/
   NotebookEdit) go through the same normalisation and the same allow-set;
   unresolvable `$` paths fail closed;
-- missing contract environment (POST_*) fails closed.
+- missing contract environment (POST_*) fails closed, and so does a tool call
+  the guard cannot read: unparseable JSON, or a tool name / command / path
+  field holding something other than the string the rule needs. Only an
+  unknown tool name is allowed through (no path or command policy applies to a
+  tool that names neither).
 
 The matcher above decides WHICH tools reach the hook, and a tool missing from
 it is a tool the guard never sees whatever the list above claims — Write and

@@ -1,8 +1,10 @@
 package devorchestrator
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -584,5 +586,106 @@ func TestTheGuardClaimInTheSystemPromptIsTrue(t *testing.T) {
 		if !slices.Contains(strings.Split(guardMatcher, "|"), tool) {
 			t.Errorf("the contract promises the guard confines %s writes and the matcher %q does not name %s — the promise is prose again", tool, guardMatcher, tool)
 		}
+	}
+
+	// ---- the read half (T1221) ------------------------------------------
+	//
+	// The sentence said "your file reads", and that was wider than the guard.
+	// The guard decides on the command TEXT: it never inspects what a shell
+	// command goes on to read, so `cat ~/.ssh/id_rsa` passes the hook, and so
+	// does `cat .rddev/runtime/tasks/<TASK>/gate-inputs.json` (both measured
+	// below as the allow side). What IS enforced is the read confinement of
+	// the file-path tools — credential stores, .env files and the harness's
+	// runtime state, refused for the Read/Grep/Glob/NotebookRead tools and for
+	// the file writers, which read what they change.
+	//
+	// So the sentence names those tools instead of claiming the shell, and
+	// this test binds the three things that have to move together: the claim,
+	// the matcher, and the guard's own verdict on both sides of the boundary.
+	// Extending confinement to the shell is a legitimate change — the failure
+	// it produces here says so, and says what else has to move with it.
+	for _, tool := range []string{"Read", "Grep", "Glob", "NotebookRead"} {
+		if !strings.Contains(sentence, tool) {
+			t.Errorf("the contract sentence %q does not name the %s tool, so a Worker cannot tell that the read confinement covers it", sentence, tool)
+		}
+		if !slices.Contains(strings.Split(guardMatcher, "|"), tool) {
+			t.Errorf("the contract sentence claims the read confinement reaches %s and the matcher %q does not name %s — the hook is never invoked for it and the promise is prose", tool, guardMatcher, tool)
+		}
+	}
+	// The limit has to be stated, and it has to be stated without the old
+	// wider claim coming back: a Worker told "your file reads" are confined
+	// will read an unconfined shell read as a malfunction, and — worse — will
+	// believe a path is unreachable when it is not.
+	const limitClaim = "not what a shell command reads"
+	if !strings.Contains(sentence, limitClaim) {
+		t.Errorf("the contract sentence %q no longer states the limit it is written to (%q). The guard inspects the command text and not what a shell command reads; if that is no longer the boundary, the sentence and this assertion both move.", sentence, limitClaim)
+	}
+	if strings.Contains(sentence, "your file reads") {
+		t.Errorf("the contract sentence %q is back to claiming file reads in general, which the guard does not enforce (a shell command's reads are not inspected) — that is the wider-than-the-mechanism sentence this task removed", sentence)
+	}
+
+	// The sentence and the guard, measured together rather than described
+	// twice. Same driver as TestFilePathToolsAreConfinedByTheGuard: the
+	// embedded guard, the contract environment, the tool-call JSON on stdin,
+	// the verdict as the exit code.
+	dir := t.TempDir()
+	guard := filepath.Join(dir, "worker-guard.sh")
+	if err := os.WriteFile(guard, []byte(GuardScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"POST_REPO_ROOT=/repo",
+		"POST_WORKER_TASK_ID=T0001",
+		"POST_WORKER_WORKTREE=/repo/.rddev/worktrees/T0001",
+		"POST_WORKER_RESULT_DIR=/repo/.rddev/workers/T0001",
+	}
+	boundary := []struct {
+		what      string
+		tool      string
+		field     string
+		value     string
+		wantBlock bool
+	}{
+		// the confined side: the same path, through a tool the matcher names
+		{"Read of a credential store", "Read", "file_path", "~/.ssh/id_rsa", true},
+		{"Read of the harness runtime record", "Read", "file_path", "/repo/.rddev/runtime/tasks/T0001/gate-inputs.json", true},
+		{"Grep of a credential store", "Grep", "path", "~/.aws/credentials", true},
+		// the limit side: the guard reads the command text, so a shell read is
+		// not inspected. If this case ever goes red the guard HAS started
+		// inspecting shell reads — good — and the sentence above must be
+		// widened in the same commit, which is exactly what this pair is for.
+		{"a shell read of a credential store is not inspected", "Bash", "command", "cat ~/.ssh/id_rsa", false},
+		{"a shell read of the runtime state is not inspected", "Bash", "command", "cat /repo/.rddev/runtime/tasks/T0001/gate-inputs.json", false},
+	}
+	for _, tc := range boundary {
+		t.Run(tc.what, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{
+				"tool_name":  tc.tool,
+				"tool_input": map[string]any{tc.field: tc.value},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("sh", guard)
+			cmd.Env = append(os.Environ(), env...)
+			cmd.Stdin = bytes.NewReader(payload)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			runErr := cmd.Run()
+
+			blocked := false
+			if ee, ok := runErr.(*exec.ExitError); ok && ee.ExitCode() == 2 {
+				blocked = true
+			} else if runErr != nil {
+				t.Fatalf("running the guard: %v (%s)", runErr, out.String())
+			}
+			if blocked != tc.wantBlock {
+				if tc.wantBlock {
+					t.Fatalf("%s is NOT confined: the contract sentence claims the read confinement reaches the %s tool and the guard allowed it (blocked=%v) — the claim is wider than the mechanism. Output: %s", tc.what, tc.tool, blocked, out.String())
+				}
+				t.Fatalf("%s is now refused, so the guard confines what this sentence says it does not (%q): widen the sentence in the same commit — the claim and the mechanism move together. Output: %s", tc.what, limitClaim, out.String())
+			}
+		})
 	}
 }

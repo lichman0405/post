@@ -16,6 +16,12 @@
 #   - git control-plane subcommands are blocked in *command position* while
 #     read-only git stays usable; a forbidden word in an argument (e.g.
 #     `grep -n "service" docs/`) is NOT matched, and neither is `echo "git commit"`;
+#   - EVERY separator the shell honours starts a new command position: `;`,
+#     `|`, `&&`, `||`, `&` and a newline. A verb on its own line is refused
+#     exactly as it is refused on the first line, for every rule below that
+#     keys off command position. (A newline reaches the tokenizer as a
+#     newline: the command text is JSON-decoded, never text-scanned — see
+#     json_string below for what a scan did to the `\n` escape);
 #   - gh/glab/tea CLIs and privilege escalation (sudo/su/doas/pkexec) are
 #     blocked entirely;
 #   - Docker socket access is blocked except `docker --version` /
@@ -45,6 +51,17 @@
 #     `sh -c '...'` and friends are deliberately treated as opaque (the shell
 #     inside would escape the analysis) and are confined by the deny layer +
 #     collect-time invariants instead.
+#   - Command-position analysis reads the command TEXT. It does not run the
+#     shell: `$var`, `${var}` and `$(...)` are not expanded, so a verb that is
+#     only spelled out by an expansion (`c=cp; $c x /etc/y`) is not matched,
+#     and neither is a command a script or a downloaded file runs. `$` in a
+#     *path* is handled on the write side, where an unresolvable expansion
+#     fails closed.
+#   - The read side is enforced for the file-path TOOLS (Read/Grep/Glob/
+#     NotebookRead, plus the file writers, which read what they change), not
+#     for shell commands: `cat <credential store>` is not inspected here. That
+#     boundary is stated in the Worker contract too
+#     (TestTheGuardClaimInTheSystemPromptIsTrue binds the two).
 #   - Redirections on a quoted path are conservatively over-blocked when the
 #     quote state cannot be resolved; unresolvable $ expansions fail closed.
 #   - WHICH tools reach this hook is worker-settings.json's matcher, not this
@@ -61,10 +78,15 @@
 # Hook protocol: the tool call JSON arrives on stdin. On a violation the guard
 # prints {"decision":"block","reason":...} on stdout, the human-readable
 # reason on stderr, and exits 2 (Claude Code reports the block). Otherwise it
-# exits 0 silently (allow). An unparseable or unknown tool call is allowed:
-# the permission layer and the collect-time invariants remain as the second
-# and third lines of defence, and this hook must never become the one that
-# breaks the Worker contract with false positives.
+# exits 0 silently (allow). A tool call whose JSON cannot be read is REFUSED,
+# and so is one whose tool name, command or path field holds something other
+# than the string this hook has to read, and so is a Bash call with no command
+# string in it: deciding on a document — or a field — the guard could not read
+# is exactly the fail-open this file exists to close. (Measured: refusing the
+# shape-mismatched field breaks no real call. Over this repo's 54031 recorded
+# tool_use calls the fields read here are strings or absent every time.)
+# Only an *unknown tool name* exits 0 — no path or command policy applies to
+# it, and refusing it would break the Worker contract with a false positive.
 #
 # Environment (all set by rddev worker spawn):
 #   POST_REPO_ROOT         absolute repo root (main checkout)
@@ -84,37 +106,13 @@ block() {
 	exit 2
 }
 
-# json_field extracts the value of a string field from the tool-call JSON on
-# stdin (top-level or nested), unescaping \" and \\ so quoted command text
-# (`echo "hi"`) survives extraction. These fields carry commands and paths,
-# not nested objects, so a string walk is the right tool.
-json_field() {
-	field=$1
-	awk -v f="$field" '
-	{
-		line = $0
-		key = "\"" f "\""
-		pos = index(line, key)
-		if (pos == 0) next
-		rest = substr(line, pos + length(key))
-		sub(/^[^:]*:[[:space:]]*/, "", rest)
-		if (substr(rest, 1, 1) != "\"") next
-		out = ""
-		esc = 0
-		for (i = 2; i <= length(rest); i++) {
-			c = substr(rest, i, 1)
-			if (esc) { out = out c; esc = 0; continue }
-			if (c == "\\") { esc = 1; continue }
-			if (c == "\"") break
-			out = out c
-		}
-		print out
-	}'
-}
-
 # json_bool_true KEYPATH prints "yes" when the boolean at that dotted path is
-# true, and prints "no" when it is absent or false. Exit 0 when the payload
-# parsed; non-zero when it did not.
+# true, and prints "no" when the key is absent or holds false (or null). Exit 0
+# when the payload parsed; non-zero when it did not — or when the key holds a
+# value that is not a boolean, which is the same "cannot read this field"
+# situation from the guard's side and fails closed the same way (a string
+# "yes" is not the true the consumer acts on, so guessing it either way is a
+# decision taken on bytes the guard could not read).
 #
 # This parses the tool input with a real JSON decoder instead of scanning the
 # raw text. Scanning is wrong in principle: the same document also carries the
@@ -137,14 +135,54 @@ for part in sys.argv[1].split("."):
     if not isinstance(cur, dict) or part not in cur:
         print("no"); sys.exit(0)
     cur = cur[part]
+if cur is not None and not isinstance(cur, bool):
+    sys.exit(4)
 print("yes" if cur is True else "no")
 ' "$1"
 }
 
 # json_string KEYPATH prints the string at that dotted path in the tool-call
-# JSON on stdin (empty when the key is absent or holds a non-string). Exit 0
-# when the payload parsed; non-zero when it did not, so callers fail closed
-# rather than decide on a document they could not read.
+# JSON on stdin, and prints nothing when the key is absent or null. Exit 0 when
+# the payload parsed and the field was readable; non-zero when it did not
+# parse, or when the field is PRESENT but holds something other than a string.
+# Callers fail closed on both, rather than decide on a document — or a field —
+# they could not read.
+#
+# The second arm is not hypothetical: a path check should not rest on the
+# encoding of its input, and an expected-string field arriving as an object is
+# exactly the shape a serialisation change would produce (and exactly the shape
+# the text scan below mis-read: it took the FIRST unescaped `"file_path"` in
+# the raw text, so a nested one won). Measured over this repo's 54031 recorded
+# tool_use calls (.rddev/workers/*/worker.log): the fields read here are
+# strings or absent every time — no legitimate call carries a non-string path,
+# command or tool name — so refusing the shape costs nothing real and is the
+# same fail-closed direction as the missing contract environment.
+#
+# It backs every string the guard decides on: tool_name (which chooses the
+# policy branch), the path fields of the file tools, and — since T1221 — the
+# Bash `command`. The command it replaced was the LAST text scan in this file,
+# and the one with the widest blast radius, because every command-position
+# rule reads from it.
+#
+# WHAT THE SCAN DID, MEASURED, so the reason is not just "scanning is wrong in
+# principle". `json_field` (removed here) treated a backslash as "take the next
+# character literally", which is right for exactly two JSON escapes and wrong
+# for the rest:
+#
+#   {"probe":"a\nb"}      ->  anb       (the \n escape became the letter n)
+#   {"probe":"a\tb"}      ->  atb
+#   {"probe":"a\\u0041b"} ->  au0041b
+#   {"probe":"a\"b"}      ->  a"b       (correct)
+#   {"probe":"a\\b"}      ->  a\b       (correct)
+#
+# A multi-line command reaches this hook the way Claude Code sends it — one
+# JSON string, so `true` + newline + `cp /tmp/x /etc/evil` arrives as
+# `"true\ncp /tmp/x /etc/evil"` — and the scan decoded that to the single word
+# `truencp /tmp/x /etc/evil`. The tokenizer then saw ONE command, whose binary
+# is `truencp`, so the write rule, the privilege-escalation rule, the
+# control-plane CLIs, git and printenv were all bypassed by pressing Enter.
+# The tokenizer was never at fault: fed a real newline it resets command
+# position correctly (that is what the regression cases now pin).
 #
 # Path fields are parsed for the reason run_in_background is parsed: a text
 # scan resolves keys differently from the JSON the consumer actually reads.
@@ -164,8 +202,9 @@ print("yes" if cur is True else "no")
 # before dispatch — so this is a defence against a SERIALISATION CHANGE rather
 # than against a live exploit, taken because a path check should not rest on
 # the current encoding of its input. The second half is the non-zero exit: an
-# unreadable payload is refused, where a text scan would silently yield no path
-# and let the call through. Both halves have regression cases.
+# unreadable payload — or an expected-string field holding something else — is
+# refused, where a text scan would silently yield no path and let the call
+# through. Both halves have regression cases.
 json_string() {
 	python3 -c '
 import json, sys
@@ -178,13 +217,20 @@ for part in sys.argv[1].split("."):
     if not isinstance(cur, dict) or part not in cur:
         print(""); sys.exit(0)
     cur = cur[part]
+if cur is not None and not isinstance(cur, str):
+    sys.exit(4)
 print(cur if isinstance(cur, str) else "")
 ' "$1"
 }
 
 # command_records emits the parsed Bash command as one record per line:
 #   BIN:<word>  the first non-assignment word of a command segment — the
-#               binary in *command position* (after ; | && || &, or the start)
+#               binary in *command position*: after ; | && || &, and at the
+#               start of EVERY LINE, because awk reads one record per line and
+#               each record resets `pending` below. That reset is what makes a
+#               newline a separator here; the command text reaches this
+#               function with real newlines because it was JSON-decoded
+#               (json_string), never text-scanned.
 #   ARG:<word>  every other word of the segment, in order
 #   SEG         end of one segment
 # Quoted strings are kept intact: `grep -n "service" docs/` yields no
@@ -518,13 +564,37 @@ read_policy() {
 
 input=$(cat)
 
-tool_name=$(printf '%s\n' "$input" | json_field tool_name)
+# The tool name is DECODED, not scanned. It chooses the policy branch, so a
+# value that differs from the one the harness dispatched on is a branch
+# mismatch — and the old scan's verdict on a payload it could not read was
+# "no tool name", i.e. allow, which is the fail-open arm. An unreadable
+# payload is refused instead.
+tool_name=$(printf '%s\n' "$input" | json_string tool_name); name_rc=$?
+if [ "$name_rc" -ne 0 ]; then
+	block "cannot parse the tool-call JSON to determine which tool is being invoked (the payload did not parse, or tool_name is not a string); refusing the call rather than choosing a policy branch from a value that could not be read."
+fi
 [ -n "$tool_name" ] || exit 0
 
 case "$tool_name" in
 	Bash)
-		command=$(printf '%s\n' "$input" | json_field command)
-		[ -n "$command" ] || exit 0
+		# The command text is decoded too, and this is the field T1221 is
+		# about: see json_string for what a text scan did to the `\n` escape
+		# of a multi-line command (it welded the second line onto the first,
+		# so every command-position rule below saw one unknown word).
+		command=$(printf '%s\n' "$input" | json_string tool_input.command); cmd_rc=$?
+		if [ "$cmd_rc" -ne 0 ]; then
+			block "cannot parse the tool-input JSON to check a shell command (the payload did not parse, or tool_input.command is not a string); refusing the call rather than allowing a command that nothing inspected."
+		fi
+		if [ -z "$command" ]; then
+			# A parsed document with no command string in it is not a Bash
+			# call this hook can inspect. The Bash tool requires `command`, so
+			# the shape only appears when something is wrong with the payload;
+			# allowing it would be the same "no command to inspect, therefore
+			# no problem" reasoning the newline hole lived on. (A `command`
+			# that is present but NOT a string never reaches here: json_string
+			# refuses that shape, so this arm is absent/null/empty only.)
+			block "the Bash tool call carries no command string (tool_input.command is absent, null or empty); refusing the call rather than allowing a shell call nothing inspected."
+		fi
 
 		# 0) background execution is refused. A Worker that backgrounds its
 		# long-running work (a full test suite) and then ends its turn leaves
@@ -535,7 +605,7 @@ case "$tool_name" in
 		# mechanically rather than requested in prose.
 		bg=$(printf '%s\n' "$input" | json_bool_true tool_input.run_in_background); bgrc=$?
 		if [ "$bgrc" -ne 0 ]; then
-			block "cannot parse the tool-input JSON to check the background-execution rule; refusing the call rather than allowing an unverified background execution."
+			block "cannot parse the tool-input JSON to check the background-execution rule (the payload did not parse, or run_in_background is not a boolean); refusing the call rather than allowing an unverified background execution."
 		fi
 		if [ "$bg" = yes ]; then
 			block "background execution is not permitted in a Worker: run the command in the foreground and wait for it. A Worker must finish its work inside its own session, never hand it to a background task and exit."
@@ -590,7 +660,7 @@ case "$tool_name" in
 		for field in file_path path notebook_path pattern; do
 			p=$(printf '%s\n' "$input" | json_string "tool_input.$field"); rc=$?
 			if [ "$rc" -ne 0 ]; then
-				block "cannot parse the tool-input JSON to check a file read; refusing the call rather than allowing an unverified read."
+				block "cannot parse the tool-input JSON to check a file read (the payload did not parse, or a path field is not a string); refusing the call rather than allowing an unverified read."
 			fi
 			[ -n "$p" ] && read_policy "$p"
 		done
@@ -611,7 +681,7 @@ case "$tool_name" in
 		for field in file_path notebook_path path; do
 			p=$(printf '%s\n' "$input" | json_string "tool_input.$field"); rc=$?
 			if [ "$rc" -ne 0 ]; then
-				block "cannot parse the tool-input JSON to check a file write; refusing the call rather than allowing an unverified write."
+				block "cannot parse the tool-input JSON to check a file write (the payload did not parse, or a path field is not a string); refusing the call rather than allowing an unverified write."
 			fi
 			[ -n "$p" ] || continue
 			read_policy "$p"
