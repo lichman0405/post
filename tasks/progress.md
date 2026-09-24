@@ -3246,9 +3246,9 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 
 ## 任务状态自动总览
 
-生成时间：2026-09-24T10:19:43Z
+生成时间：2026-09-24T10:38:15Z
 
-状态分布：todo 3 · ready 1 · running 0 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 1 · merged 164（合计 171/171 个任务）
+状态分布：todo 3 · ready 0 · running 1 · worker_failed 0 · verification 2 · rejected 0 · blocked 0 · accepted 1 · merged 164（合计 171/171 个任务）
 
 | Task | 标题 | 阶段 | 状态 | 开始 | 完成 | 验收 | 合并 |
 |---|---|---|---|---|---|---|---|
@@ -3421,7 +3421,7 @@ owner 选择 DB 触发器；13 张表上 `BEFORE UPDATE/DELETE` + `BEFORE TRUNCA
 | T1225 | 表面判据自己的解析器会把 `!` 行读成命中：`.gitignore` 的**源路径**里只要有一个冒号，`pat="${hdr#*:}"; pat="${pat#*:}"` 就剥错字段（源里带冒号 → `!` 前缀落在错的字段上 → 目录循环里静默缩小扫描面、文件循环里把健康树判红） | P13 | todo |  |  |  |  |
 | T1226 | a11y 扫描把 `/search` 记成「有数据」，实际扫的是**零来源回退**：这是 L1-20260922-5 承诺的那笔（触发条件「V1 之后的第一轮补强」已到）——播一条能命中的文档，并断言页面上真的出现**引用** | P13 | verification | 2026-09-24T09:53:17Z |  |  |  |
 | T1227 | 没有名册的仪器就是没人跑的仪器：给 `tests/**` 与 `scripts/**` 下的每一台仪器立一份名册，并让一个 `go test ./...` 能跑到的检查器守住它——起点是我量过的那台（17 张视觉基线的比对，今天没有任何**活入口**跑它） | P13 | todo |  |  |  |  |
-| T1228 | `update_progress.py --check` 是一台**只能说「不」**的仪器：它拿**当下这一秒**去比文件里那次生成的时间戳（`生成时间：{stamp}` 就在被比较的正文里，而 `stamp` 默认取 `now_stamp()`），所以对任何已提交的 `progress.md` 它永远报 stale——我据此**差点把它接进 `task-state` 作业**，那会让 main 永远红。把时间戳排除出比较，并证明它**两侧都能说** | P13 | ready |  |  |  |  |
+| T1228 | `update_progress.py --check` 是一台**只能说「不」**的仪器：它拿**当下这一秒**去比文件里那次生成的时间戳（`生成时间：{stamp}` 就在被比较的正文里，而 `stamp` 默认取 `now_stamp()`），所以对任何已提交的 `progress.md` 它永远报 stale——我据此**差点把它接进 `task-state` 作业**，那会让 main 永远红。把时间戳排除出比较，并证明它**两侧都能说** | P13 | running | 2026-09-24T10:19:44Z |  |  |  |
 | T1229 | P13 把证书赖以得绿的那套安全仪器换掉了：把 V1 证书在最终树上再重钉一次（Gate H 在 18 行总门上重挣、陈旧字面逐个重取、逐层「重挣 / 沿用」） | P12 | todo |  |  |  |  |
 
 <!-- AUTO-PROGRESS:END -->
