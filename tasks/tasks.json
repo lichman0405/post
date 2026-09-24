@@ -8988,7 +8988,8 @@
         "internal/devorchestrator/**",
         "cmd/rddev/**",
         "tests/acceptance/four-gate-helpers.sh",
-        "tests/acceptance/rejection-retry-e2e.sh"
+        "tests/acceptance/rejection-retry-e2e.sh",
+        "ops/ci/gosec-baseline.txt"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -9000,7 +9001,7 @@
         "apps/**",
         "services/**",
         "infra/**",
-        "ops/**",
+        "ops/**（`ops/ci/gosec-baseline.txt` 除外）",
         "scripts/**",
         "Makefile",
         "tests/security/**",
@@ -9035,10 +9036,11 @@
         "`go test -count=1 ./cmd/rddev/... ./internal/devorchestrator/...`（**必须 `-count=1`**，Go 不追踪测试缓存之外的输入）退出码 0，原文进 RESULT。",
         "**`rejection-retry-e2e` 在慢的情况下也绿**：用受控的慢（可配置延迟或假 reaper）造出**旧代码会红、新代码会绿**的那一次，红绿两次输出都贴出来；`bash tests/acceptance/rejection-retry-e2e.sh` 本身退出码 0。",
         "`grep -rn 'exit.status' --include='*.go' --include='*.sh' .` 的每一处命中都在 RESULT 里被点过名并给出处置（等文件 / 等进程 / 只读值），没有一处是「没管」。",
-        "**没有越界**：`git status --porcelain -uall` 只列 `allowed_scope` 内的路径；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`scripts/**`、`Makefile` 一个字节未动（给出为空的 `git diff --stat HEAD -- <那些路径>` 原文）；`tests/acceptance/v1-final-report.md`（`92cb6c19…`）与 `v1-final-audit.sh`（`c6ae3181…`）的 `sha256sum` 与交付前一致；无残留进程。"
+        "**没有越界**：`git status --porcelain -uall` 只列 `allowed_scope` 内的路径；`tasks/**`、`specs/**`、`docs/**`、`.github/**`、`scripts/**`、`Makefile` 一个字节未动（给出为空的 `git diff --stat HEAD -- <那些路径>` 原文）；`tests/acceptance/v1-final-report.md`（`92cb6c19…`）与 `v1-final-audit.sh`（`c6ae3181…`）的 `sha256sum` 与交付前一致；无残留进程。",
+        "**`security-master` 的 gosec 基线已按新行号重新对过，且没有动过任何权限模式**：`ops/ci/gosec-baseline.txt` 里 `internal/devorchestrator/**` 那几条的**行号**改成你树里的行号，**一条一行、保留原来的 category 与 reason 原文**——`sast_report.py` 明文拒绝目录级或规则级条目，别写成一行盖一片。给出 `sast-go` 那一行的原文（应当是 `0 unbaselined`）。**那几个权限模式一个字节都不许改**：它们不是你的代码，是 main 上的既有行，已被复核判定为 `not-attacker-reachable`；其中 `guardScript` 与 `run-worker.sh` 的 `0o755` 是**可执行**语义，按 G306 压到 0600 会让守卫跑不起来。"
       ],
-      "scope_note": "这一笔是**流水线自己的可信度**，不是产品功能，所以 `v1_required` 为 false：V1 证书（`tests/acceptance/v1-final-report.md` 与它的校验器）钉在它自己那棵树上，不依赖它，它也不改任何产品语义、权限模型或科研语义。它修的是**每笔任务的必过作业**——`#243` 挡的是 `go`（required），`#207`/`#133` 挡的是 `acceptance`（required），所以它自己的验收也可能被它要修的那个偶发红拦下；真遇到时按 `rddev` 的记录重跑，**不许**放宽任何断言。",
-      "supervisor_scope_narrowing": "**为什么把两个验收脚本单独写进 `allowed_scope` 而不是给 `tests/acceptance/**`**：这个目录里还躺着 V1 证书（`v1-final-report.md`）、它的校验器（`v1-final-audit.sh`）与 `gitea-real-services-e2e.sh`（那是 #240 的面，另有任务）——整目录放开会让这三样都变成可写，而它们要么不能被改（证书钉在 `91ed2d5`），要么会把两笔任务的冲突面糊在一起。逐一列出要改的两个文件，边界才是可核的。**为什么 `scripts/**` 不在范围内**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py` / `validate_task_state.py`），让被验收者改卷子等于让考生改分——同一口径在 T1211 与 T1204 用过。**为什么 `gates.json` / `ci.yml` 不在范围内**：作业定义与「哪几个作业是 required」是验收判据的来源，改判据不在实现任务的范围里；若你判断必须改，在 RESULT 里点名说清楚，我来接。**为什么允许碰 `cmd/rddev/**` 的测试**：`#243` 的症状就出在 `cmd/rddev/worker_test.go` 的 `TestWorkerStop`，修法可能落在测试的收尾等待上，不收进来会让工人为了一个测试文件报 blocked。"
+      "scope_note": "这一笔是**流水线自己的可信度**，不是产品功能，所以 `v1_required` 为 false：V1 证书（`tests/acceptance/v1-final-report.md` 与它的校验器）钉在它自己那棵树上，不依赖它，它也不改任何产品语义、权限模型或科研语义。它修的是**每笔任务的必过作业**——`#243` 挡的是 `go`（required），`#207`/`#133` 挡的是 `acceptance`（required），所以它自己的验收也可能被它要修的那个偶发红拦下；真遇到时按 `rddev` 的记录重跑，**不许**放宽任何断言。**`ops/ci/gosec-baseline.txt` 为什么在允许面内（这是任务书原先漏掉的一块）**：`security-master` 的 `sast-go` 行按 `path:line:column:RULE` 键控，`tests/security/sast_report.py` **明文拒绝**目录级/glob 级条目，所以它只能按行号写；你在 `internal/devorchestrator/**` 里插行，就会把 main 上已经复核过的既有发现顶到新行号上，它们随即变成 `unbaselined` 而判红——**这不是你引入的缺陷**。判据自己点名了那个文件，任务书原先却把它关在 `ops/**` 外面，于是这一关在工人手里无解。放宽这一条即可。（断言过：`unbaselined` 失败、旧键 `stale` 只印提示不失败，所以重对行号是安全的。）",
+      "supervisor_scope_narrowing": "**为什么把两个验收脚本单独写进 `allowed_scope` 而不是给 `tests/acceptance/**`**：这个目录里还躺着 V1 证书（`v1-final-report.md`）、它的校验器（`v1-final-audit.sh`）与 `gitea-real-services-e2e.sh`（那是 #240 的面，另有任务）——整目录放开会让这三样都变成可写，而它们要么不能被改（证书钉在 `91ed2d5`），要么会把两笔任务的冲突面糊在一起。逐一列出要改的两个文件，边界才是可核的。**为什么 `scripts/**` 不在范围内**：那里是验收仪器本身（`record_test_run.py` / `validate_specs.py` / `spec_version.py` / `validate_task_state.py`），让被验收者改卷子等于让考生改分——同一口径在 T1211 与 T1204 用过。**为什么 `gates.json` / `ci.yml` 不在范围内**：作业定义与「哪几个作业是 required」是验收判据的来源，改判据不在实现任务的范围里；若你判断必须改，在 RESULT 里点名说清楚，我来接。**为什么允许碰 `cmd/rddev/**` 的测试**：`#243` 的症状就出在 `cmd/rddev/worker_test.go` 的 `TestWorkerStop`，修法可能落在测试的收尾等待上，不收进来会让工人为了一个测试文件报 blocked。**为什么把 `ops/ci/gosec-baseline.txt` 收进允许面**：这一关红的是**行号漂移**，不是缺陷。报出来的那几处权限模式全都在 main 上（`worker_guard.go` 195/199/206/209、`worker_spawn.go` 767/790、`worker_registry.go` 173），只是被你在同一个文件里插入的行统一推后了——`worker_guard.go` 一律 +25，另两个文件一律 +3。偏移一致，说明行没被改过。它们已被复核为 `not-attacker-reachable` 并写进基线；基线只能按行号写（`sast_report.py` 拒绝目录级条目），所以**唯一正确的修法是重对行号**，而那个文件原先在 `ops/**` 的禁区里。**不要改那些权限模式**：`guardScript` 与 `run-worker.sh` 的 `0o755` 是可执行语义。"
     },
     {
       "id": "T1216",

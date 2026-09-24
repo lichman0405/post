@@ -19077,3 +19077,35 @@ scope 那一行是**放宽到判据本来要求的范围**，不是「为了让�
 把它列为派生物的理由就是「Worker 重新生成它，而不是把它当文本合并」）。
 collect 的 `scope` 检查、G2 的 `spec-validation`、CI 的 `spec_version.py --check`
 一个都没有删、没有 skip、没有放宽。
+
+### 六、缺口 C（同一次调查里挖出来的）：返工信把「G2 有作业红」一律读成「你的代码有缺陷」
+
+`.rddev/tools/resolve_decisions.py` 的 `reason_for()` 按 `failed_jobs(tid)` 分叉：
+只要最近一次 G2 里有**任何**作业红，抬头就是
+
+    【返工 —— 验收时 `security-master` 这条检查没过，请照下面报错改】
+    **它是一个真实缺陷，要你在代码里改掉，不是重跑一遍就会过去。**
+
+这个分叉对 T1215 是**假的**，而且指向一条走不通的路：
+
+  * 报出来的那几处 gosec 发现**全都在 main 上**，只是被工人在同一个文件里插入的行推后了。
+    偏移是**一致的**——`worker_guard.go` 一律 +25（main 195/199/206/209 -> 树里 220/224/231/234）、
+    `worker_spawn.go` 与 `worker_registry.go` 一律 +3。行号整体平移而内容不变，
+    恰恰证明那些行不是工人写的。「一致偏移」是判据，不是巧合。
+  * `ops/ci/gosec-baseline.txt` 按 `path:line:column:RULE` 键控，而
+    `tests/security/sast_report.py` **明文拒绝**目录级/glob 级条目——所以基线只能按行号写，
+    行一动就得重对。那几处早已被复核为 `not-attacker-reachable`，**不是缺陷**。
+  * `sast-go` 那行的失败话术**自己就写着**修法：「If it is not [a real finding], add ONE line
+    per finding to {baseline}」——而 `ops/**` 当时是 T1215 的 `forbidden_scope`。
+    **判据点名的那个文件，正是任务书不许它碰的文件。** 于是这一关在工人手里无解：
+    它要么改那些权限模式（其中 `guardScript` 与 `run-worker.sh` 的 `0o755` 是**可执行**语义，
+    按 G306 压到 0600 会让守卫跑不起来——终点是坏的），要么报 blocked。
+  * 顺带一处：信里贴的发现行是 `hits[:8]` **截断过的**，工人连「一共几条」都看不到。
+
+**已做**：`rddev worker stop T1215`（它当时正照那封信改），任务书里把
+`ops/ci/gosec-baseline.txt` 收进 `allowed_scope`、从 `ops/**` 的禁区里开出来，
+并写明**不许动那些权限模式**、要一条一行地重对行号。
+
+**要立账的**（与缺口 A、B 并列）：返工信需要一个「红的是行号漂移，不是你的代码」的分支，
+判据至少有两条现成的——偏移是否一致、以及失败的键是否本来就在基线里。
+把那封信原样发出去，代价是让一个工人去修 main 上的既有行，或者让它报一次 blocked。
