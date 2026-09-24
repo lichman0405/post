@@ -6,7 +6,12 @@ Python reports in the same shape through its own reader below.
 
 WHY A BASELINE FILE AND NOT A FLAG
 ----------------------------------
-gosec reports 254 findings on this tree and eslint-plugin-security 88. Some are
+gosec reports 256 findings on this tree and eslint-plugin-security 88. (Both
+re-derived 2026-09-24, from the rows' own output: `bash tests/security/sast.sh
+go` prints the first as "256 finding(s) reported" — this docstring said 254, the
+count when it was written, and nothing moves a number here except the code — and
+`grep -c '^[^#]' ops/ci/eslint-security-baseline.txt` the second. They are what
+those two faces report, not numbers this file maintains.) Some are
 the tool's own false positives (it flags every `m[k]` as an object-injection
 sink, every `exec.Command(a, "git", args...)` as command injection, every
 cookie whose `Secure` is a variable as an insecure cookie); some are real-shaped

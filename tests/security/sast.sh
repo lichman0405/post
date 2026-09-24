@@ -37,6 +37,29 @@
 #     ignored", exit 2), so a planted TypeScript fixture for that face lives in
 #     a temporary directory in the tree and is removed again, while the Go and
 #     Python faces take any directory — their tools do not have that rule.
+#  5. THE GO FACE'S DEFAULT SURFACE IS THIS REPOSITORY'S OWN SOURCE, AND THE
+#     SURFACE IS CHECKED. That surface is DERIVED — the module's package set,
+#     as `go list ./...` reports it, minus the package directories git ignores
+#     (installed and generated state: the pinned tools' node_modules holds an
+#     npm package that ships a Go file, which the toolchain returns as a
+#     package of this module) — and not a walk from the repository root. The
+#     walk is what a scanner does by itself when it is handed `./...`, and
+#     gosec's walk goes where Go's package patterns do not: into
+#     dot-directories. A working copy's root also holds `.rddev/`, and in it
+#     the orchestrator's rebaseline drafts and other Workers' worktrees are
+#     COPIES of this tree's source and of source that is not committed yet.
+#     Scanned, they arrive as this tree's findings: such a run reds on findings
+#     that exist in no commit (a working copy of this repository, 2026-09-24:
+#     350 findings, 94 of them copies), while CI — a checkout, no `.rddev/` —
+#     stays green, so the defect is visible only where nobody gates on it.
+#     Deriving the surface fixes what is scanned; asserting that every file fed
+#     to the scanner is under $ROOT and not git-ignored is what keeps it fixed
+#     (repo_paths_only below, and the note in the go face). Both halves are
+#     needed: only the derivation and the next edit to the invocation can undo
+#     it; only the assertion and an ignored file inside a package that stays in
+#     the surface arrives as a finding of a tree nobody reviewed. Every package
+#     directory the derivation drops is printed with the .gitignore rule that
+#     dropped it, so a surface that shrank is a line in the log, not a silence.
 #
 # Exit codes
 #   0  the pinned tool ran over the target, and every finding it reported is
@@ -59,8 +82,11 @@ VERSIONS="$ROOT/ops/security/tool-versions.sh"
 # file walker changed. They apply to the DEFAULT surface only — a mutation run
 # points the row at a planted fixture on purpose, and prints the target it
 # used. (2026-09-23, the counts the three rows print on this tree: gosec 797
-# files, eslint 129, bandit 8. They are the observed numbers, printed by the
-# rows themselves — not a list this comment maintains.)
+# files, eslint 129, bandit 8. 2026-09-24, after the go row's surface became
+# this module's packages — the set `go list ./...` names, minus the package
+# directories git ignores — instead of a walk from the repository root: gosec
+# 783. They are the observed numbers, printed by the rows themselves — not a
+# list this comment maintains.)
 #
 # Each face enforces its own floor inline, right after its scanner writes its
 # report and before the report is judged — it is bound to that face's report
@@ -89,6 +115,81 @@ report() { # report <tool> <report.json> <baseline> <id> <version> [rule-count]
     --tool "$tool" --report "$file" --baseline "$baseline" --id "$id" --version "$version" --rules "$rules"
 }
 
+repo_paths_only() { # repo_paths_only <row id> <path>...  -> 0, or names the paths and returns 1
+  # Every path a row feeds its scanner has to be a path of THIS repository:
+  # under $ROOT, and not something git ignores.
+  #
+  # It is a check and not an assumption because the two are told apart by
+  # something no scanner knows about. A working copy's root holds local state
+  # beside the source — `.rddev/` carries the orchestrator's rebaseline drafts
+  # and other Workers' worktrees, each one a copy of this tree's source, some
+  # of it uncommitted — and the tools here cannot tell a copy from the original:
+  # they read files. Git can, and that is the whole of this function.
+  #
+  # What makes it worth asserting rather than trusting is what the wrong answer
+  # costs. A copy's finding is not this tree's finding: judged against
+  # ops/ci/*-baseline.txt it is unbaselined and red, so the row reports another
+  # tree's code as this one's — and the fix that suggests itself, adding the
+  # path to the baseline, writes a file name that no commit contains into a
+  # document whose every line is supposed to be a reviewed finding of this
+  # repository. So an ignored path is refused HERE, as a failed surface, and
+  # never reaches the scanner to come back as a finding to be judged.
+  #
+  # The oracle is asked both ways before it is believed, because an oracle
+  # stuck on one answer turns this into a check that can only pass (it never
+  # reports anything, and the surface escapes in silence) or only fail (every
+  # path looks like an escape). The two questions have known answers: a path
+  # under this repository's own runtime state is ignored on purpose, and a
+  # tracked file of it is not.
+  local id="$1"; shift
+  local p bad=() inside=() out line rc
+  for p in "$@"; do
+    case "$p" in
+      "$ROOT"|"$ROOT"/*) inside+=("$p");;
+      *) bad+=("$p  — not a path of this repository: it is not under $ROOT");;
+    esac
+  done
+  if [ "${#inside[@]}" -gt 0 ]; then
+    if printf '%s\n' "$ROOT/.rddev/sast-surface-probe" | git -C "$ROOT" check-ignore --stdin -q \
+       && ! printf '%s\n' "$ROOT/go.mod" | git -C "$ROOT" check-ignore --stdin -q; then
+      :
+    else
+      die "$id: the surface check cannot be trusted on this tree: 'git check-ignore' did not answer \
+'ignored' for this repository's own runtime state and 'not ignored' for a tracked file of it, so it \
+cannot tell this repository's source from the local state that sits beside it. Until it can, this row \
+cannot say what it scanned."
+    fi
+    out="$(printf '%s\n' "${inside[@]}" | git -C "$ROOT" check-ignore --stdin -v 2>&1)"; rc=$?
+    case "$rc" in
+      0) while IFS= read -r line; do
+           [ -n "$line" ] || continue
+           p="${line##*$'\t'}"
+           # named the way the rest of the row names files: relative to $ROOT
+           bad+=("${p#"$ROOT"/}  — git-ignored by ${line%%$'\t'*}, so it is local state, not source of this repository")
+         done <<<"$out";;
+      1) ;;
+      *) printf '%s\n' "$out" | sed 's/^/     /' >&2
+         die "$id: the surface check could not be run: 'git check-ignore' exited $rc. The default \
+surface of the Go face is told apart from local state by git, so this row has to run from a checkout \
+of this repository (not from an unpacked copy of it).";;
+    esac
+  fi
+  [ "${#bad[@]}" -eq 0 ] && return 0
+  {
+    echo "$id: SCAN SURFACE FAILED — this row scans this repository's own source and nothing else,"
+    echo "and these paths are not that:"
+    printf '  %s\n' "${bad[@]}"
+    echo ""
+    echo "A path git ignores is local state, not a file of this repository: a scratch directory, a"
+    echo "copy of the tree, or another checkout (.rddev/ holds all three on a working copy). Scanning"
+    echo "one reports a tree nobody reviewed as if it were this one — and baselining such a finding"
+    echo "would write a path into ops/ci/*-baseline.txt that no commit contains. If a path above"
+    echo "really is source that belongs to this repository, git does not know about it yet: add it,"
+    echo "then re-run this row."
+  } >&2
+  return 1
+}
+
 case "${1:-}" in
   go)
     have go || die "go is not on PATH (https://go.dev/dl)"
@@ -100,12 +201,127 @@ case "${1:-}" in
 (ops/security/tool-versions.sh). Run 'make security-tools'. A scanner whose version floated is a \
 verdict from an unknown instrument."
     TARGET="${POST_SAST_GO_TARGET:-.}"
-    [ -d "$TARGET" ] || die "sast go: no such directory to scan: $TARGET"
-    echo "     target: $TARGET (POST_SAST_GO_TARGET; the default is the repository root)"
-    # The `/...` suffix is not decoration: `gosec .` loads the one package in the
-    # current directory (at this root: a package with no Go files) and writes no
-    # report at all, which the row then reports as "the scanner measured nothing".
-    gosec -fmt=json -out="$WORK/gosec.json" -quiet "${TARGET%/}/..." >"$WORK/gosec.log" 2>&1
+    if [ -n "${POST_SAST_GO_TARGET:-}" ]; then
+      [ -d "$TARGET" ] || die "sast go: no such directory to scan: $TARGET"
+      echo "     target: $TARGET (POST_SAST_GO_TARGET; the default is the module's own packages)"
+      # The override scans exactly what it points at, which is what it is for:
+      # a mutation check points this row at a planted fixture to watch the row
+      # go red on it. So `/...` is kept here (the fixture may have directories
+      # under it) and repo_paths_only is NOT applied — a fixture is planted on
+      # purpose, and on a working copy a deliberately ignored directory is the
+      # natural place to plant one. The default surface above is unaffected.
+      echo "     surface: POST_SAST_GO_TARGET is set, so this run scans what it points at and nothing"
+      echo "     else — including anything inside it that is not this repository's source. The check"
+      echo "     that every scanned path is this repository's, unignored, is not applied to it."
+      SURFACE=("${TARGET%/}/...")
+    else
+      TARGET="the module's own packages"   # what the floor message below names
+      # DERIVED, not hand-maintained: the module's package set, as the Go
+      # toolchain itself lists it. `go list ./...` is the difference between
+      # this face and the defect above — it skips the directories Go does not
+      # treat as source (a leading `.` or `_`, and testdata), which is exactly
+      # what gosec's own walk from the root does not do. A package that moves
+      # or appears is in the surface because the toolchain says so.
+      #
+      # The package set alone is not yet this repository's source. Installed
+      # and generated state lives in directories whose names Go reserves
+      # nothing for, and the toolchain cannot tell it from source: with the
+      # pinned tools installed (`make security-tools`) the npm package
+      # `flatted` ships a Go file under tests/security/node-tools/node_modules/,
+      # which `go list ./...` returns as a package of this module (784 Go files
+      # against 783 without it). Judging a dependency's file against this
+      # repository's baseline is the same defect as scanning a rebaseline
+      # draft, one directory over — so the surface is the module's packages
+      # MINUS the directories git ignores, and git is the oracle the assertion
+      # below also uses. Nothing is dropped in silence: every ignored package
+      # directory is printed with the rule that ignores it.
+      have git || die "git is not on PATH — this row's default surface is this repository's own \
+source, and it is told apart from the local state that sits beside it (.rddev/: rebaseline drafts and \
+other Workers' worktrees, each one a copy of this tree's source) with 'git check-ignore'. A copy's \
+finding is not this tree's finding, so the row will not scan without that answer. Run it from a \
+checkout of this repository."
+      # -e so that a package the toolchain fails to list is still returned (and
+      # then reported by gosec as one it could not type-check, as before)
+      # instead of taking the whole surface down with it. There is no `set -e`
+      # here, so a `die` inside the substitution below exits only the subshell:
+      # every call is followed by `|| exit 1`.
+      packages() { # packages <go list format> — the module's package set, or a die that says why not
+        local out
+        if ! out="$(go list -e -f "$1" ./... 2>"$WORK/golist.log")"; then
+          sed 's/^/     /' "$WORK/golist.log" >&2
+          die "sast go: 'go list ./...' failed, so this row cannot say which packages of the module it \
+would scan. The surface is derived from the toolchain; with no answer from it there is no surface to \
+scan, and scanning the root instead is the defect this row was fixed for."
+        fi
+        printf '%s' "$out"
+      }
+      DIRS_LIST="$(packages '{{.Dir}}')" || exit 1
+      FILES_LIST="$(packages '{{range .GoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}')" || exit 1
+      DIRS=()
+      while IFS= read -r d; do [ -n "$d" ] && DIRS+=("$d"); done <<<"$DIRS_LIST"
+      [ "${#DIRS[@]}" -gt 0 ] || die "sast go: 'go list ./...' named no package of this module — \
+a scan of an empty surface reports no findings, which is indistinguishable from a clean one."
+
+      # Which of those directories git ignores, and by which rule — one call
+      # for all of them. `-v` is what makes the dropped list auditable: it
+      # names the .gitignore line that did it, so a rule that is too broad is
+      # visible in the row's own output instead of being a smaller surface.
+      declare -A IGNORED_OF=()
+      DROP_RC=0
+      DROP_OUT="$(printf '%s\n' "${DIRS[@]}" | git -C "$ROOT" check-ignore --stdin -v 2>&1)" || DROP_RC=$?
+      case "$DROP_RC" in
+        0) while IFS= read -r line; do
+             [ -n "$line" ] || continue
+             IGNORED_OF["${line##*$'\t'}"]="${line%%$'\t'*}"
+           done <<<"$DROP_OUT";;
+        1) ;;   # nothing ignored: every package of the module is a package of this repository
+        *) printf '%s\n' "$DROP_OUT" | sed 's/^/     /' >&2
+           die "sast go: 'git check-ignore' exited $DROP_RC, so this row cannot tell which packages of \
+the module are this repository's source and which are installed or generated state git ignores. Run it \
+from a checkout of this repository.";;
+      esac
+
+      SURFACE=(); DROPPED=(); FILES=()
+      for d in "${DIRS[@]}"; do
+        if [ -n "${IGNORED_OF[$d]:-}" ]; then
+          DROPPED+=("${d#"$ROOT"/}  — git-ignored by ${IGNORED_OF[$d]}")
+        else
+          SURFACE+=("$d")
+        fi
+      done
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        [ -n "${IGNORED_OF[${f%/*}]:-}" ] && continue
+        FILES+=("$f")
+      done <<<"$FILES_LIST"
+      [ "${#SURFACE[@]}" -gt 0 ] || die "sast go: every package of this module is git-ignored, so this \
+surface is empty — a scan of nothing reports no findings, which is indistinguishable from a clean one."
+      # The assertion is on the FILES, not on the package directories: it is
+      # the files gosec reads (its own default leaves test files alone, so the
+      # set above leaves them alone too). A directory git ignores is dropped
+      # above and printed; a file git ignores inside a directory that stays is
+      # exactly what this refuses.
+      repo_paths_only sast-go "${FILES[@]}" || exit 1
+      echo "     target: this module's own packages — ${#SURFACE[@]} of them, ${#FILES[@]} Go file(s), \
+from 'go list ./...' (POST_SAST_GO_TARGET overrides)"
+      if [ "${#DROPPED[@]}" -gt 0 ]; then
+        if [ "${#DROPPED[@]}" -eq 1 ]; then DROPPED_NOUN="package directory"; else DROPPED_NOUN="package directories"; fi
+        echo "     surface: NOT scanned — ${#DROPPED[@]} $DROPPED_NOUN of the module that git ignores:"
+        echo "     installed or generated state rather than source of this repository, and a finding in a"
+        echo "     dependency's file is not a finding of this tree:"
+        printf '       %s\n' "${DROPPED[@]}"
+      fi
+    fi
+    # The `/...` suffix, where it is used above, is not decoration: `gosec .`
+    # loads the one package in the current directory (at this root: a package
+    # with no Go files) and writes no report at all, which the row then reports
+    # as "the scanner measured nothing". The default surface needs neither: it
+    # is a list of package directories, and gosec scans each one and does not
+    # walk below it — so the files it reads are the files checked above (for
+    # the two packages of this module that hold only test files there is
+    # nothing either of them reads, which is why they are not in that list).
+    # No `/...` on the default surface is also what makes that check complete.
+    gosec -fmt=json -out="$WORK/gosec.json" -quiet "${SURFACE[@]}" >"$WORK/gosec.log" 2>&1
     rc=$?
     if [ "$rc" -gt 1 ]; then
       tail -20 "$WORK/gosec.log" | sed 's/^/     /'

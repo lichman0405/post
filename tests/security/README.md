@@ -32,7 +32,7 @@ bash tests/security/master-security-gate.sh --report /tmp/gate.json
 | `vuln-go` | `govulncheck ./...` — Go dependency CVEs | govulncheck |
 | `vuln-node` | `pnpm audit --audit-level=low` — the web workspace | pnpm |
 | `vuln-python` | `uv audit` — the scientific adapter | uv |
-| `sast-go` | `gosec` over the whole module: every finding is either new (red) or one line of `ops/ci/gosec-baseline.txt` with a written review — no `-exclude-dir`, no severity floor, no `#nosec`, and a floor on the number of files scanned so a scan that covered nothing is red | go, gosec |
+| `sast-go` | `gosec` over this module's own Go source — the package set `go list ./...` names, minus the package directories git ignores (each one is printed with the rule that drops it): every finding is either new (red) or one line of `ops/ci/gosec-baseline.txt` with a written review — no `-exclude-dir`, no severity floor, no `#nosec`, every scanned file is checked to be under the repository root and not git-ignored before the scanner runs, and a floor on the number of files scanned so a scan that covered nothing is red | go, gosec |
 | `sast-python` | `bandit` over the adapter's source under the same per-finding rule (`ops/ci/bandit-baseline.txt`) | python3, bandit |
 | `sast-node` | `eslint` with every rule of `eslint-plugin-security/recommended` forced to `error`, over `apps/web` + `packages/ui`, with a floor on the rule count so a plugin upgrade cannot quietly narrow the rule set | node, the `node-tools` toolchain (`make security-tools`) |
 | `sbom-go` | a CycloneDX document built from `go.mod` by `cyclonedx-gomod`, licence evidence included: it parses, it has components, and it witnesses the key Go dependencies of `docs/40` | go, cyclonedx-gomod |

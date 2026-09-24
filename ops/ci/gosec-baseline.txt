@@ -11,11 +11,39 @@
 # findings a reviewer judged not to be a security issue, and the reason column
 # says which line was judged and why.
 #
-# tool: gosec v2.29.0 over the whole Go module: 797 files, 254 findings
-#       (53 HIGH, 159 MEDIUM, 42 LOW, as the row's severity-mix line reports).
-# surface: every package in the module. Nothing was excluded by directory,
-#       severity or -nosec: tests/security/sast.sh passes no such flag and
-#       sast_report.py rejects any key that is not file:line:rule.
+# tool: gosec v2.29.0 over this module's own packages: 783 files, 256 findings
+#       (53 HIGH, 161 MEDIUM, 42 LOW, as the row's severity-mix line reports).
+#       Both numbers are re-derived, on 2026-09-24, from the row's own output:
+#       `bash tests/security/sast.sh go` prints "783 file(s) scanned, 256
+#       finding(s) reported" and the mix above, and the entries in THIS file —
+#       which are the same 256 — by `grep -c '^[^#]' ops/ci/gosec-baseline.txt`.
+#       They are what this tree printed on that date, not a list this comment
+#       maintains: the file count follows the module, the finding count the
+#       code. (Written 2026-09-23 as 797 files / 254 findings; the file count
+#       moved when the row stopped walking the filesystem from the root and
+#       started scanning the package set `go list ./...` reports — see the next
+#       paragraph — and the finding count moved with two entries T1217 added.)
+# surface: this module's own packages, as `go list ./...` names them. The row
+#       derives that list, drops the package directories git ignores (installed
+#       and generated state: with the pinned tools installed, an npm package
+#       under tests/security/node-tools/node_modules/ ships a Go file the
+#       toolchain returns as a package of this module), prints every directory
+#       it dropped with the rule that dropped it, and checks the files of the
+#       packages that remain before the scanner runs: each one under the
+#       repository root, and not git-ignored (tests/security/sast.sh,
+#       repo_paths_only). Nothing is excluded by directory, severity or -nosec:
+#       the row passes no such flag — there is no -exclude-dir, no -nosec and no
+#       severity floor in its invocation — and sast_report.py rejects any key
+#       that is not file:line:rule. What the package set leaves out is what Go
+#       does not call source: directories named testdata or beginning with `.`
+#       or `_` (a fixture of tests/contract/testdata is data, not a package).
+#       "Every package in the module" used to be the claim here, and it was not
+#       true: the row walked the filesystem from the repository root instead, so
+#       a working copy's .rddev/ — rebaseline drafts and other Workers'
+#       worktrees, copies of this tree's source and of source nobody had
+#       committed — was scanned and its findings reported as this tree's. CI
+#       never saw it (a checkout has no .rddev/); every local gate run did.
+#       Rewritten 2026-09-24 (T1220) with the surface it now describes.
 # review: each entry quotes the flagged source line and names the construct it
 #       belongs to. Gosec's own G115/G304/G703 templates cover most of the
 #       volume; the sites where the honest verdict differs carry a note that
