@@ -67,13 +67,29 @@ func TestGuardRegressionSuiteRunsWhereCIRunsIt(t *testing.T) {
 	// expectations until they are unreachable) is the failure this catches,
 	// and the task that does it has to raise this number on purpose.
 	//
-	// 188 is the count T1219 lands with: 154 before it, plus the two-sided
+	// 188 was the count T1219 landed with: 154 before it, plus the two-sided
 	// file-writing-tool pairs (Write/Edit/MultiEdit/NotebookEdit), the
 	// decoder-vs-text-scan payloads, and the fail-closed contract-env cases.
 	// Every one of them was 154 until the matcher named those tools.
-	const floor = 188
+	//
+	// 365 is what T1221 raises it to: +177, and every one of them is a case
+	// the newline hole needed. The hole was one separator wide and every verb
+	// family deep, so the growth is a matrix rather than a case — 6
+	// separators (; | && || & and a newline) × 15 dangerous second-position
+	// commands (the five shell write verbs, the four privilege-escalation
+	// binaries, the three control-plane CLIs, git and printenv) = 90 refusals,
+	// plus the allowed neighbour of each family in the same position (11 per
+	// separator = 66), plus the raw wire shapes of a two-line command and the
+	// two unicode-escape spellings of the same trick (5), the
+	// tab-is-not-a-separator pair (3), the payloads the guard cannot read —
+	// unparseable documents and no-command Bash calls (5) and the fields that
+	// are present but are not the string the rule needs (5) — the
+	// unknown-tool-name counter-case (1) and the two shell-read cases that
+	// pin the limit the contract sentence states (2). A floor set below the
+	// count a task lands with would let that task's cases be deleted again.
+	const floor = 365
 	if total < floor {
-		t.Fatalf("the suite ran %d cases, below the %d it carried when T1219 closed the Write/Edit envelope gap — cases were removed or made unreachable:\n%s", total, floor, got)
+		t.Fatalf("the suite ran %d cases, below the %d it carried when T1221 closed the newline hole in command-position analysis — cases were removed or made unreachable:\n%s", total, floor, got)
 	}
 	t.Logf("guard regression suite: %d/%d PASS against the embedded guard", pass, total)
 }

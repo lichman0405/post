@@ -412,6 +412,190 @@ check_json "the key inside the command text does not fool the rule" block "backg
 	'{"tool_name":"Bash","tool_input":{"command":"echo \"run_in_background\": false","run_in_background":true}}'
 
 # ---------------------------------------------------------------------------
+# Command POSITION — the SECOND position (T1221).
+#
+# Every separator the shell honours starts a new command position, and every
+# verb family the guard names is refused there exactly as it is refused in the
+# first position. That was false for one separator, and this section is the
+# two-sided pair for each cell of separator × family.
+#
+# What happened: the Bash command text was pulled out of the tool-call JSON by
+# a text scan (`json_field`) that ate the backslash of an escape and kept the
+# next character, so the `\n` of a multi-line command became the LETTER n and
+# welded the lines together — `true` + newline + `cp /tmp/x /etc/evil` decoded
+# to the single word `truencp /tmp/x /etc/evil`. The tokenizer then saw one
+# command with an unknown binary, so every rule keyed off command position was
+# bypassed by pressing Enter: not only the write rule, but privilege
+# escalation, the control-plane CLIs, git and printenv as well.
+#
+# The fix is that the command is JSON-decoded (`json_string`), so a newline
+# reaches the tokenizer as a newline — which it always handled correctly. The
+# rival diagnosis ("command_records only analyses the first line") is wrong,
+# and `command_records` is unchanged: fed a real newline it resets command
+# position per line, which is what these rows now pin.
+#
+# Every row runs `true` first, so a refusal can only come from the second
+# position. The newline rows pass a REAL newline: `check` encodes the value
+# with a JSON encoder, which emits exactly the `\n` escape Claude Code puts on
+# the wire, so these rows exercise the wire shape and not a shell convenience.
+# shellcheck disable=SC2034  # the loop variables below are read by the loops
+nl=$'\n'
+
+SEPARATORS=(
+	';:semicolon'
+	' | :pipe'
+	' && :and-and'
+	' || :or-or'
+	' &:ampersand'
+	"${nl}:newline"
+)
+
+# One dangerous use per verb family the guard names, with the fragment its
+# refusal must carry (a block for the wrong reason is not a pass).
+BLOCK_IN_SECOND=(
+	'cp /tmp/x /etc/evil|confined'
+	'rm -rf /etc/evil|confined'
+	'mv /tmp/x /etc/evil|confined'
+	'ln -s /tmp/x /etc/evil|confined'
+	'install /tmp/x /etc/evil|confined'
+	'tee /etc/evil|confined'
+	'sudo ls|privilege escalation'
+	'su -|privilege escalation'
+	'doas ls|privilege escalation'
+	'pkexec ls|privilege escalation'
+	'gh auth login|control-plane'
+	'glab mr list|control-plane'
+	'tea issues|control-plane'
+	'git commit -m x|control-plane'
+	'printenv GITHUB_TOKEN|credential'
+)
+
+# The allowed neighbour of each family, in the same position. sudo and the
+# control-plane CLIs have no legitimate use in a Worker at all, so their
+# allowed side is the word that must NOT be matched when it is not in command
+# position — the suite's existing shape ("echo sudo is not sudo").
+ALLOW_IN_SECOND=(
+	'cp a b'
+	'rm -f file.txt'
+	'mv a b'
+	'ln -s a b'
+	'install -m 644 a b'
+	'tee notes.log'
+	'git status --short'
+	'git log --oneline -5'
+	'printenv PATH'
+	'echo "sudo"'
+	'echo "gh auth login"'
+)
+
+# NB: check() assigns its parameters as globals (name/expect/reason/tool/...),
+# so this loop keeps its own variables out of those names.
+for sep_spec in "${SEPARATORS[@]}"; do
+	sepv=${sep_spec%%:*}
+	sepname=${sep_spec#*:}
+	for row in "${BLOCK_IN_SECOND[@]}"; do
+		rowverb=${row%%|*}
+		rowreason=${row#*|}
+		check "second position after $sepname: $rowverb" block "$rowreason" Bash command "true${sepv}${rowverb}"
+	done
+	for rowverb in "${ALLOW_IN_SECOND[@]}"; do
+		check "allowed in second position after $sepname: $rowverb" allow "" Bash command "true${sepv}${rowverb}"
+	done
+done
+
+# The raw wire shape, spelled as JSON rather than built by the helper: this is
+# the payload Claude Code sends for a two-line command, and the one the text
+# scan decoded wrong. The backslash is built rather than written so that the
+# payload under test is unambiguous.
+bs=$(printf '\\')
+check_json "the wire shape of a two-line write is refused" block "confined" \
+	"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"true${bs}ncp /tmp/x /etc/evil\"}}"
+check_json "the wire shape of a two-line git command is refused" block "control-plane" \
+	"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"true${bs}ngit commit -m x\"}}"
+check_json "the wire shape of a two-line privilege escalation is refused" block "privilege escalation" \
+	"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"true${bs}nsudo ls\"}}"
+
+# The same newline, spelled as a unicode escape — and the same trick applied to
+# a verb. Claude Code's encoder emits the two-character newline escape, so no
+# harness produces these today; they are here for the reason the path decoder's
+# comment gives, that a check should not rest on the current encoding of its
+# input. Both spellings decode to the same command text, and the decoded text
+# is what the guard decides on. The text scan did not: it kept the escape's
+# payload verbatim, so the newline one became the letters "u000a" (welding the
+# lines into one word) and the verb one became "u0072m" (hiding `rm` behind an
+# unknown binary) — the same two failures as the plain spellings above.
+check_json "the newline as a unicode escape is refused" block "confined" \
+	"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"true${bs}u000acp /tmp/x /etc/evil\"}}"
+check_json "a verb written as a unicode escape is refused" block "confined" \
+	"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"${bs}u0072m -rf /etc/evil\"}}"
+
+# ...and an escape that is NOT a separator stays one command. `\t` decodes to a
+# tab, which the shell treats as word whitespace, so `true<TAB>cp a b` runs
+# `true` with arguments and writes nothing. Pinned in both directions because
+# the same decoder change moved both: the mis-decoded `\t` (the letter t) is a
+# correctness bug with no bypass behind it, unlike `\n`.
+tab=$(printf '\t')
+check "a tab is whitespace, not a command position (write)"  allow "" Bash command "true${tab}cp a b"
+check "a tab is whitespace, not a command position (git)"    allow "" Bash command "true${tab}git status --short"
+check "a tab is whitespace, not a command position (sudo)"   allow "" Bash command "true${tab}echo sudo"
+
+# ---------------------------------------------------------------------------
+# A payload the guard cannot read is REFUSED (T1221). This is the arm the
+# newline hole got in through the other way round: the text scan's verdict on a
+# document it could not read was "no command", and "no command" was allowed
+# through. The tool name chooses the policy branch, so an unreadable document is
+# refused before the branch is even chosen.
+
+check_json "unparseable tool-call JSON fails closed before the branch" block "cannot parse" \
+	'{"tool_name":'
+check_json "unparseable tool input fails closed for a shell command" block "cannot parse" \
+	'{"tool_name":"Bash","tool_input":{"command":"rm -rf /etc/evil"'
+check_json "a Bash call with no command string is refused" block "no command string" \
+	'{"tool_name":"Bash","tool_input":{"timeout":120000}}'
+check_json "an empty command is refused" block "no command string" \
+	'{"tool_name":"Bash","tool_input":{"command":""}}'
+check_json "a null command reads as no command, not as a shape mismatch" block "no command string" \
+	'{"tool_name":"Bash","tool_input":{"command":null}}'
+
+# ...and the SHAPE arm, which is the other half of the same rule. A field the
+# guard reads that is PRESENT but holds something other than the string it needs
+# is refused exactly like a document that does not parse: "there is a value here
+# and I cannot read it" is not the same fact as "there is no value here", and
+# letting the first through because reading it has no obvious answer is the same
+# fail-open shape the newline hole came through. The measured basis for
+# refusing it is in the guard (54031 recorded tool calls in this repo's worker
+# logs: the fields read here are strings or absent every time, so the refusal
+# costs no real call).
+check_json "a non-string command is refused" block "cannot parse" \
+	'{"tool_name":"Bash","tool_input":{"command":{"cmd":"rm -rf /etc/evil"}}}'
+check_json "a non-string tool name is refused" block "cannot parse" \
+	'{"tool_name":17,"tool_input":{"command":"true"}}'
+check_json "a non-string run_in_background is refused" block "cannot parse" \
+	'{"tool_name":"Bash","tool_input":{"command":"true","run_in_background":"yes"}}'
+check_json "a path field that is a nested object is refused" block "cannot parse" \
+	'{"tool_name":"Read","tool_input":{"file_path":{"path":"/etc/evil"}}}'
+check_json "a path field that is a list is refused" block "cannot parse" \
+	'{"tool_name":"Write","tool_input":{"file_path":["/etc/evil"],"content":"x"}}'
+
+# The other side of that rule: an UNKNOWN tool name is not a broken payload.
+# No path policy applies to a tool that names no path, and refusing it would be
+# the false positive this hook must not become.
+check_json "an unknown tool name is still allowed (no policy applies)" allow "" \
+	'{"tool_name":"TodoWrite","tool_input":{"todos":[]}}'
+
+# ---------------------------------------------------------------------------
+# What the read envelope does NOT reach (T1221). The guard reads the command
+# TEXT; it does not run the shell, so what a shell command goes on to read is
+# not inspected. The Worker contract says so in those words, and
+# TestTheGuardClaimInTheSystemPromptIsTrue drives this same guard to keep the
+# sentence and the behaviour together: widening the confinement to the shell
+# has to move the sentence in the same commit, and these two cases are what
+# makes that failure visible.
+
+check "shell read of a credential store is not inspected"      allow "" Bash command 'cat ~/.ssh/id_rsa'
+check "shell read of the harness runtime state is not inspected" allow "" Bash command 'cat /repo/.rddev/runtime/tasks/T0010/gate-inputs.json'
+
+# ---------------------------------------------------------------------------
 
 if [ "$fail" -gt 0 ]; then
 	printf 'guard-regression: %d/%d PASS, %d FAILED\n' "$pass" "$((pass + fail))" "$fail" >&2

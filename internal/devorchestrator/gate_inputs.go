@@ -19,7 +19,7 @@ import (
 //
 // Spawn now records the authoritative gate inputs under
 // .rddev/runtime/tasks/<TASK>/ — a path the Worker's guard refuses for both
-// reads and shell writes (the guard confines the Worker to its worktree, its
+// reads and writes (the guard confines the Worker to its worktree, its
 // result dir and /tmp). Collect judges by those values and verifies the
 // Worker-writable copies (registry.json, task-package.json, the generated
 // guard layer) against them: a mismatch is a hard reject, not a judgement on
