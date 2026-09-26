@@ -1,0 +1,13 @@
+[Unit]
+Description=Local route for POST public IP browser/API origin
+After=network.target
+Before=nginx.service post-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip address replace 43.164.136.29/32 dev lo
+ExecStop=/usr/sbin/ip address del 43.164.136.29/32 dev lo
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

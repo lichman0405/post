@@ -35,6 +35,7 @@ type buildReport struct {
 	ProjectID   string            `json:"project_id"`
 	ProjectSlug string            `json:"project_slug"`
 	Users       map[string]string `json:"user_ids"`
+	Projects    map[string]string `json:"demo_project_ids"`
 	Counts      map[string]int    `json:"counts"`
 	Items       []buildItem       `json:"items"`
 	Unavailable []string          `json:"unavailable"`
@@ -49,7 +50,11 @@ type builder struct {
 	report   *buildReport
 	refs     *refTable
 
-	projectID string
+	projectID      string
+	userClients    map[string]*client
+	projectClients map[string]*client
+	projectActors  map[string]string
+	orgIDs         map[string]string
 	// forkProjectID is the project the external group's fork created. It is
 	// what tells the two sessions apart (see apiFor): the demo project and
 	// the fork have different members, so a write into one cannot be made
@@ -65,7 +70,8 @@ type builder struct {
 	// origin_refs must name a release or a state, or the publish is refused
 	// as unpinned), so the id has to survive from the release stage to the
 	// asset stage.
-	releases map[string]string
+	releases  map[string]string
+	assetRefs map[string]assets.DependencyPin
 }
 
 type buildConfig struct {
@@ -98,17 +104,23 @@ func runBuild(ctx context.Context, cfg buildConfig) (*buildReport, error) {
 		return nil, err
 	}
 	b := &builder{
-		api:      c,
-		plan:     plan,
-		db:       db,
-		refs:     newRefTable(),
-		branches: map[string]branchNode{},
-		releases: map[string]string{},
+		api:            c,
+		plan:           plan,
+		db:             db,
+		refs:           newRefTable(),
+		branches:       map[string]branchNode{},
+		releases:       map[string]string{},
+		userClients:    map[string]*client{},
+		projectClients: map[string]*client{},
+		projectActors:  map[string]string{},
+		orgIDs:         map[string]string{},
+		assetRefs:      map[string]assets.DependencyPin{},
 		report: &buildReport{
-			Plan:    cfg.PlanPath,
-			APIBase: cfg.APIBase,
-			Users:   map[string]string{},
-			Counts:  map[string]int{},
+			Plan:     cfg.PlanPath,
+			APIBase:  cfg.APIBase,
+			Users:    map[string]string{},
+			Projects: map[string]string{},
+			Counts:   map[string]int{},
 			// The lists start empty so the machine-readable report carries []
 			// rather than null when nothing failed or nothing was skipped.
 			Items:       []buildItem{},
@@ -133,6 +145,7 @@ func runBuild(ctx context.Context, cfg buildConfig) (*buildReport, error) {
 		{"mechanism-water-binding branch and selective publication", b.stageMechanism},
 		{"release R1.0", b.stageReleaseR10},
 		{"research assets", b.stageAssets},
+		{"independent collaboration projects", b.stageCollaborationProjects},
 	}
 	if cfg.External {
 		stages = append(stages, stage{"external contribution", b.stageExternal})
@@ -140,6 +153,7 @@ func runBuild(ctx context.Context, cfg buildConfig) (*buildReport, error) {
 		b.report.Unavailable = append(b.report.Unavailable,
 			"external contribution: skipped by --external=0; the fork route needs the Gitea provisioning keys")
 	}
+	stages = append(stages, stage{"English presentation content", b.stageEnglishPresentation})
 	for _, st := range stages {
 		if err := st.run(ctx); err != nil {
 			// A stage's own error is fatal: it means the builder could not
@@ -151,7 +165,35 @@ func runBuild(ctx context.Context, cfg buildConfig) (*buildReport, error) {
 	}
 	b.report.ProjectID = b.projectID
 	b.report.ProjectSlug = b.plan.Project.Slug
+	b.report.Projects["source"] = b.projectID
 	return b.report, nil
+}
+
+// stageEnglishPresentation appends English versions to existing synthetic
+// records. Their earlier versions remain available as part of the audit trail.
+func (b *builder) stageEnglishPresentation(ctx context.Context) error {
+	var current struct {
+		Purpose string `json:"purpose"`
+	}
+	if err := b.api.get("/api/v1/projects/"+b.projectID, &current); err != nil {
+		return err
+	}
+	if current.Purpose != b.plan.Project.Purpose {
+		if err := b.api.do("PATCH", "/api/v1/projects/"+b.projectID,
+			map[string]any{"purpose": b.plan.Project.Purpose}, nil); err != nil {
+			return err
+		}
+		b.item("English project purpose", "updated", pathAPI, "")
+	}
+	for _, revision := range b.plan.PresentationRevisions {
+		if err := b.ensureDivergentVersion(ctx, revision); err != nil {
+			return err
+		}
+	}
+	if err := b.ensureRelations(ctx, b.projectID, "main", b.plan.PresentationRelations); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *builder) note(format string, args ...any) {
@@ -183,10 +225,13 @@ func (b *builder) stageProject(ctx context.Context) error {
 	}
 	b.refs.users["owner"] = ownerID
 	b.report.Users["owner"] = ownerID
+	b.userClients["owner"] = b.api
 	b.item("user "+owner.Handle, "ok", pathAPI, "POST /api/v1/auth/signup or /login; user_id="+ownerID)
 
 	orgIDs := map[string]string{}
-	for _, o := range b.plan.Organizations {
+	orgs := append([]PlanOrg{}, b.plan.Organizations...)
+	orgs = append(orgs, b.plan.CollaborationDemo.Organizations...)
+	for _, o := range orgs {
 		if o.Key == "external" {
 			continue // created by the external user in the external stage
 		}
@@ -195,7 +240,14 @@ func (b *builder) stageProject(ctx context.Context) error {
 			return err
 		}
 		orgIDs[o.Key] = id
+		b.orgIDs[o.Key] = id
 		b.item("organization "+o.Slug, status, pathAPI, "organization_id="+id)
+	}
+	if err := b.stageCollaborationAccounts(); err != nil {
+		return err
+	}
+	if err := b.ensureOrganizationMemberships(orgIDs); err != nil {
+		return err
 	}
 
 	var list struct {
@@ -255,6 +307,11 @@ func (b *builder) planUser(key string) *PlanUser {
 			return &b.plan.Users[i]
 		}
 	}
+	for i := range b.plan.CollaborationDemo.Users {
+		if b.plan.CollaborationDemo.Users[i].Key == key {
+			return &b.plan.CollaborationDemo.Users[i]
+		}
+	}
 	return nil
 }
 
@@ -263,6 +320,74 @@ func (b *builder) planOrg(key string) *PlanOrg {
 		if b.plan.Organizations[i].Key == key {
 			return &b.plan.Organizations[i]
 		}
+	}
+	for i := range b.plan.CollaborationDemo.Organizations {
+		if b.plan.CollaborationDemo.Organizations[i].Key == key {
+			return &b.plan.CollaborationDemo.Organizations[i]
+		}
+	}
+	return nil
+}
+
+// stageCollaborationAccounts creates and authenticates every non-owner,
+// non-fork account through the normal login/signup routes. Keeping one
+// isolated cookie jar per account is what lets later project records carry
+// the correct real actor identity.
+func (b *builder) stageCollaborationAccounts() error {
+	for _, user := range b.plan.CollaborationDemo.Users {
+		c, err := newClient(b.api.base)
+		if err != nil {
+			return err
+		}
+		id, err := c.login(user)
+		if err != nil {
+			return err
+		}
+		b.userClients[user.Key] = c
+		b.refs.users[user.Key] = id
+		b.report.Users[user.Key] = id
+		b.item("user "+user.Handle, "ok", pathAPI, "normal authenticated account; user_id="+id)
+	}
+	return nil
+}
+
+func (b *builder) ensureOrganizationMemberships(orgIDs map[string]string) error {
+	for _, user := range b.plan.CollaborationDemo.Users {
+		orgID := orgIDs[user.Org]
+		if orgID == "" {
+			return fmt.Errorf("demo user %s names unknown organization %q", user.Key, user.Org)
+		}
+		var current struct {
+			Members []struct {
+				UserID string `json:"user_id"`
+			} `json:"members"`
+		}
+		path := "/api/v1/organizations/" + orgID + "/members"
+		if err := b.api.get(path, &current); err != nil {
+			return fmt.Errorf("list members for organization %s: %w", user.Org, err)
+		}
+		userID := b.refs.users[user.Key]
+		found := false
+		for _, member := range current.Members {
+			if member.UserID == userID {
+				found = true
+				break
+			}
+		}
+		if found {
+			b.item("organization membership "+user.Handle, "reused", pathDBRead, "organization="+user.Org)
+			continue
+		}
+		role := user.OrgRole
+		if role == "" {
+			role = "contributor"
+		}
+		if err := b.api.post(path, map[string]any{
+			"handle": user.Handle, "role": role, "affiliation_start": "2025-01-01", "verified": false,
+		}, nil); err != nil {
+			return fmt.Errorf("add %s to organization %s: %w", user.Handle, user.Org, err)
+		}
+		b.item("organization membership "+user.Handle, "created", pathAPI, "organization="+user.Org+" role="+role+" synthetic affiliation unverified")
 	}
 	return nil
 }
@@ -388,7 +513,7 @@ func (b *builder) ensureBranch(ctx context.Context, br PlanBranch, baseRef strin
 	if baseRef != "" {
 		body["base_ref"] = baseRef
 	}
-	if err := b.api.post("/api/v1/projects/"+b.projectID+"/branches", body, &created); err != nil {
+	if err := b.apiFor(b.projectID).post("/api/v1/projects/"+b.projectID+"/branches", body, &created); err != nil {
 		return branchNode{}, fmt.Errorf("create branch %s: %w", br.Name, err)
 	}
 	node = branchNode{ID: created.ID, Name: created.Name, Visibility: created.Visibility, StateID: created.BaseState, Lifecycle: created.Lifecycle}
@@ -457,6 +582,9 @@ func (b *builder) apiFor(projectID string) *client {
 	if b.external != nil && b.forkProjectID != "" && projectID == b.forkProjectID {
 		return b.external
 	}
+	if c := b.projectClients[projectID]; c != nil {
+		return c
+	}
 	return b.api
 }
 
@@ -468,6 +596,9 @@ func (b *builder) actorFor(projectID string) string {
 		if id := b.refs.users[b.plan.External.User]; id != "" {
 			return id
 		}
+	}
+	if id := b.projectActors[projectID]; id != "" {
+		return id
 	}
 	return b.refs.users["owner"]
 }
@@ -985,9 +1116,122 @@ func (b *builder) stageAssets(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("project id %q is not a usable origin ref", b.projectID)
 	}
+	releasePin, ok := b.releaseOriginRef()
+	if !ok {
+		return fmt.Errorf("source project has no release pin")
+	}
 	for _, a := range b.plan.Assets {
-		if err := b.ensureAsset(ctx, a, originProject); err != nil {
+		if err := b.ensureAsset(ctx, a, originProject, releasePin); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// stageCollaborationProjects creates each independently owned research
+// space, then writes its objects through that owner's own authenticated API
+// session. The public projects become visible together while their project
+// and object histories retain separate accountable creators.
+func (b *builder) stageCollaborationProjects(ctx context.Context) error {
+	for _, demo := range b.plan.CollaborationDemo.Projects {
+		owner := b.planUser(demo.Owner)
+		if owner == nil || b.userClients[demo.Owner] == nil {
+			return fmt.Errorf("collaboration project %s names an unavailable owner %q", demo.Key, demo.Owner)
+		}
+		orgID := b.orgIDs[demo.Org]
+		if orgID == "" {
+			return fmt.Errorf("collaboration project %s names unknown organization %q", demo.Key, demo.Org)
+		}
+		api := b.userClients[demo.Owner]
+		var listed struct {
+			Projects []struct {
+				ID   string `json:"id"`
+				Slug string `json:"slug"`
+			} `json:"projects"`
+		}
+		if err := api.get("/api/v1/projects?limit=200", &listed); err != nil {
+			return fmt.Errorf("list projects for %s: %w", owner.Handle, err)
+		}
+		projectID := ""
+		for _, existing := range listed.Projects {
+			if existing.Slug == demo.Slug {
+				projectID = existing.ID
+				break
+			}
+		}
+		status := "reused"
+		if projectID == "" {
+			var created struct {
+				Project struct {
+					ID string `json:"id"`
+				} `json:"project"`
+			}
+			if err := api.post("/api/v1/projects", map[string]any{
+				"slug": demo.Slug, "name": demo.Name, "purpose": demo.Purpose,
+				"visibility": "public", "organization_id": orgID,
+			}, &created); err != nil {
+				return fmt.Errorf("create collaboration project %s: %w", demo.Slug, err)
+			}
+			projectID, status = created.Project.ID, "created"
+		}
+		if projectID == "" {
+			return fmt.Errorf("collaboration project %s returned an empty id", demo.Slug)
+		}
+		b.report.Projects[demo.Key] = projectID
+		b.projectClients[projectID] = api
+		b.projectActors[projectID] = b.refs.users[demo.Owner]
+		b.item("project "+demo.Slug, status, pathAPI, "project_id="+projectID+" owner="+owner.Handle)
+
+		previousProject := b.projectID
+		previousMain, hadMain := b.branches["main"]
+		b.projectID = projectID
+		branch, err := b.ensureBranch(ctx, PlanBranch{
+			Name: "main", Visibility: "public", Purpose: "canonical line for the synthetic collaboration demo",
+		}, "")
+		if err != nil {
+			b.projectID = previousProject
+			return fmt.Errorf("collaboration project %s main branch: %w", demo.Slug, err)
+		}
+		b.branches["main"] = branch
+		if err := b.ensureObjects(ctx, projectID, "main", demo.Objects); err != nil {
+			b.projectID = previousProject
+			if hadMain {
+				b.branches["main"] = previousMain
+			} else {
+				delete(b.branches, "main")
+			}
+			return fmt.Errorf("collaboration project %s objects: %w", demo.Slug, err)
+		}
+		if err := b.ensureRelations(ctx, projectID, "main", demo.Relations); err != nil {
+			b.projectID = previousProject
+			if hadMain {
+				b.branches["main"] = previousMain
+			} else {
+				delete(b.branches, "main")
+			}
+			return fmt.Errorf("collaboration project %s relations: %w", demo.Slug, err)
+		}
+		if len(demo.Assets) > 0 {
+			head, err := b.headOf(ctx, "main")
+			if err != nil {
+				return err
+			}
+			statePin, ok := assets.NewOriginRef(assets.KindState, head)
+			if !ok {
+				return fmt.Errorf("collaboration project %s has invalid main state", demo.Slug)
+			}
+			projectPin, _ := assets.NewOriginRef(assets.KindProject, projectID)
+			for _, a := range demo.Assets {
+				if err := b.ensureAsset(ctx, a, projectPin, statePin); err != nil {
+					return fmt.Errorf("collaboration project %s asset: %w", demo.Slug, err)
+				}
+			}
+		}
+		b.projectID = previousProject
+		if hadMain {
+			b.branches["main"] = previousMain
+		} else {
+			delete(b.branches, "main")
 		}
 	}
 	return nil
@@ -998,7 +1242,7 @@ func (b *builder) stageAssets(ctx context.Context) error {
 // re-run's read and the first run's write cannot drift apart.
 const assetVersion = "1.0.0"
 
-func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject assets.OriginRef) error {
+func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject, sourcePin assets.OriginRef) error {
 	versionID, err := b.refs.version(a.Object)
 	if err != nil {
 		return fmt.Errorf("asset %s: %w", a.Key, err)
@@ -1013,11 +1257,7 @@ func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject as
 	// asset is published from the release the demo cuts — so it names the
 	// release, which is the stronger of the two pins.
 	refs := []string{string(originProject), string(originVersion)}
-	releaseRef, ok := b.releaseOriginRef()
-	if !ok {
-		return fmt.Errorf("asset %s: no release is recorded, and the publish gate refuses a version whose origin refs name no release or state", a.Key)
-	}
-	refs = append(refs, string(releaseRef))
+	refs = append(refs, string(sourcePin))
 	// The manifest's metadata is plan text with the same references every
 	// other payload carries: a dataset asset's blob_ids has to name the file
 	// the seed actually wrote, and that id is only known at run time.
@@ -1029,11 +1269,19 @@ func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject as
 	if !ok {
 		return fmt.Errorf("asset %s manifest metadata is not an object", a.Key)
 	}
+	pins := make([]assets.DependencyPin, 0, len(a.Dependencies))
+	for _, dep := range a.Dependencies {
+		pin, ok := b.assetRefs[dep]
+		if !ok {
+			return fmt.Errorf("asset %s depends on asset %s before it has been published", a.Key, dep)
+		}
+		pins = append(pins, pin)
+	}
 	manifest := assets.Manifest{
 		Version:        assets.ManifestFormatVersion,
 		AssetType:      assets.Type(a.AssetType),
 		Metadata:       assets.Metadata(metadata),
-		DependencyPins: []assets.DependencyPin{},
+		DependencyPins: pins,
 	}
 	if err := manifest.Validate(); err != nil {
 		return fmt.Errorf("asset %s manifest: %w", a.Key, err)
@@ -1059,7 +1307,7 @@ func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject as
 		"origin_refs":    refs,
 		"visibility":     "public",
 		"integrity_hash": hash,
-		"creator_ids":    []string{b.refs.users["owner"]},
+		"creator_ids":    b.assetCreatorIDs(a),
 		"title":          a.Title,
 		"slug":           a.Slug,
 	}
@@ -1076,6 +1324,9 @@ func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject as
 			return fmt.Errorf("asset %s: %w", a.Key, err)
 		}
 		if published {
+			if pin, ok := assets.NewDependencyPin(assets.PID(pid), assetVersion); ok {
+				b.assetRefs[a.Key] = pin
+			}
 			b.item("asset "+a.AssetType+" "+a.Slug, "reused", pathDBRead,
 				"pid="+pid+" version="+assetVersion+" is already published (a published asset version is immutable)")
 			return nil
@@ -1096,12 +1347,29 @@ func (b *builder) ensureAsset(ctx context.Context, a PlanAsset, originProject as
 		AssetPID string `json:"asset_pid"`
 		Version  string `json:"version"`
 	}
-	if err := b.api.post("/api/v1/projects/"+b.projectID+"/assets:publish", body, &created); err != nil {
+	if err := b.apiFor(b.projectID).post("/api/v1/projects/"+b.projectID+"/assets:publish", body, &created); err != nil {
 		return fmt.Errorf("asset %s: %w", a.Key, err)
+	}
+	if pin, ok := assets.NewDependencyPin(assets.PID(created.AssetPID), created.Version); ok {
+		b.assetRefs[a.Key] = pin
 	}
 	b.item("asset "+a.AssetType+" "+a.Slug, "created", pathAPI,
 		"pid="+created.AssetPID+" version="+created.Version)
 	return nil
+}
+
+func (b *builder) assetCreatorIDs(a PlanAsset) []string {
+	keys := a.Creators
+	if len(keys) == 0 {
+		keys = []string{"owner"}
+	}
+	ids := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if id := b.refs.users[key]; id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (b *builder) planPR(key string) PlanPR {
@@ -1516,6 +1784,7 @@ func (b *builder) stageExternal(ctx context.Context) error {
 	b.refs.users[ext.User] = userID
 	b.report.Users[ext.User] = userID
 	b.external = extClient
+	b.userClients[ext.User] = extClient
 	b.item("user "+user.Handle+" (external)", "ok", pathAPI, "user_id="+userID)
 
 	if org := b.planOrg(ext.Org); org != nil {
@@ -1524,6 +1793,7 @@ func (b *builder) stageExternal(ctx context.Context) error {
 			return err
 		}
 		b.item("organization "+org.Slug+" (external)", status, pathAPI, "organization_id="+id)
+		b.orgIDs[ext.Org] = id
 	}
 
 	mainBranch, ok := b.branches["main"]
@@ -1559,6 +1829,8 @@ func (b *builder) stageExternal(ctx context.Context) error {
 		return fmt.Errorf("fork (the route needs POST_GITEA_BASE_URL, POST_GITEA_TOKEN and POST_GITEA_WEBHOOK_URL): %w", err)
 	}
 	forkProjectID, forkBranchID := fork.Project.ID, fork.Branch.ID
+	b.projectClients[forkProjectID] = extClient
+	b.projectActors[forkProjectID] = userID
 	status := "created"
 	if fork.AlreadyForked {
 		status = "reused"
