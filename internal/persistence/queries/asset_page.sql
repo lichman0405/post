@@ -232,7 +232,9 @@ ORDER BY ad.created_at, ad.project_id, ad.dependency_type;
 -- always names a valid label, which is never empty).
 SELECT re.event_type,
        re.visibility,
-       re.actor_id::text AS actor_id,
+       -- Research events may legitimately have no actor; the page renders
+       -- that as an anonymous event instead of failing the whole asset read.
+       COALESCE(re.actor_id::text, '')::text AS actor_id,
        COALESCE(re.payload ->> 'version', '')::text AS version,
        re.occurred_at
 FROM research_events re

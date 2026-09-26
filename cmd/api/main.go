@@ -378,6 +378,14 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
 		return exitConfig
 	}
+	cookieSecure, err := sessionCookiesSecure(cfg.Layer, authCfg.WebOrigin, os.Getenv(insecureHTTPCookiesEnv))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "post-api: authentication configuration error:\n%v\n", err)
+		return exitConfig
+	}
+	if !cookieSecure && cfg.Layer == config.LayerProd {
+		slog.Warn("session cookies allowed over HTTP for temporary trial")
+	}
 	// Edge hardening (T1106, docs/23 §7): the response-header set and the
 	// shared rate-limit budgets. Loaded fail-closed like every other
 	// configuration block — an unparseable budget refuses to start rather
@@ -405,7 +413,7 @@ func run(args []string) int {
 		Limiter:    rateLimiter,
 		OIDCClient: newOIDCClientOrNil(authCfg),
 		Cfg:        *authCfg,
-		Secure:     cfg.Layer == config.LayerProd,
+		Secure:     cookieSecure,
 		Audit:      auditStore,
 	})
 	// Product APIs (T0102+): one shared mux under one guard. The auth, profile,

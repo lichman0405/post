@@ -28,7 +28,7 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   // The API redirects failed OIDC flows to /login?error=<code>; surface
@@ -188,6 +188,9 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
             </Link>
           </>
         )}
+      </p>
+      <p className="auth-sub auth-sub-after">
+        Need a demo account? <Link href="/demo">Browse the eight demo roles</Link>.
       </p>
     </div>
   );

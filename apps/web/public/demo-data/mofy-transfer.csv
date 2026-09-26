@@ -1,0 +1,4 @@
+humidity_pct,temperature_k,water_site_occupancy,ethylene_site_occupancy
+0,298,0.05,0.83
+40,298,0.31,0.58
+70,298,0.54,0.34

@@ -56,6 +56,10 @@ var objectFloors = []struct {
 }
 
 func runVerify(ctx context.Context, cfg verifyConfig) (*verifyReport, error) {
+	planDoc, err := LoadPlan(cfg.PlanPath)
+	if err != nil {
+		return nil, err
+	}
 	db, err := newDiscover(ctx, cfg.DBURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect to the database: %w", err)
@@ -104,6 +108,47 @@ func runVerify(ctx context.Context, cfg verifyConfig) (*verifyReport, error) {
 		}
 		rep.Checks = append(rep.Checks, c)
 	}
+
+	// The collaboration seed promises eight independent accounts and two
+	// extra public projects when the external fork is enabled. Count those
+	// identities independently of the build report so a partially completed
+	// seed cannot claim the demo is ready.
+	expectedEmails := make([]string, 0, len(planDoc.Users)+len(planDoc.CollaborationDemo.Users))
+	for _, user := range planDoc.Users {
+		if !cfg.External && user.Key == planDoc.External.User {
+			continue
+		}
+		expectedEmails = append(expectedEmails, user.Email)
+	}
+	for _, user := range planDoc.CollaborationDemo.Users {
+		expectedEmails = append(expectedEmails, user.Email)
+	}
+	var seededAccounts int
+	if err := pool.QueryRow(ctx, `select count(*) from users where email = any($1)`, expectedEmails).Scan(&seededAccounts); err != nil {
+		return nil, err
+	}
+	accountQuery := "select count(*) from users where email = any(array[" + quotedList(expectedEmails) + "])"
+	add(check{
+		Item: "independent demo login accounts", Required: len(expectedEmails), Actual: seededAccounts,
+		Status: passFail(seededAccounts == len(expectedEmails)),
+		Detail: "accounts use the normal authentication table and distinct email/handle pairs",
+		Query:  collapse(accountQuery),
+	})
+
+	projectSlugs := make([]string, 0, len(planDoc.CollaborationDemo.Projects))
+	for _, project := range planDoc.CollaborationDemo.Projects {
+		projectSlugs = append(projectSlugs, project.Slug)
+	}
+	var collaborationProjects int
+	if err := pool.QueryRow(ctx, `select count(*) from projects where slug = any($1)`, projectSlugs).Scan(&collaborationProjects); err != nil {
+		return nil, err
+	}
+	projectQuery := "select count(*) from projects where slug = any(array[" + quotedList(projectSlugs) + "])"
+	add(check{
+		Item: "independently owned collaboration projects", Required: len(projectSlugs), Actual: collaborationProjects,
+		Status: passFail(collaborationProjects == len(projectSlugs)),
+		Query:  collapse(projectQuery),
+	})
 
 	// --- object counts, per docs/34's per-item checklist -------------------
 	for _, f := range objectFloors {
@@ -431,6 +476,14 @@ func runVerify(ctx context.Context, cfg verifyConfig) (*verifyReport, error) {
 	rep.Notes = append(rep.Notes,
 		fmt.Sprintf("%d checks passed, %d failed, %d not checked", rep.PassedCount, rep.FailedCount, len(rep.Unavailable)))
 	return rep, nil
+}
+
+func quotedList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, "'"+strings.ReplaceAll(value, "'", "''")+"'")
+	}
+	return strings.Join(quoted, ",")
 }
 
 type verifyConfig struct {

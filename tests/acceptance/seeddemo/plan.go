@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -98,6 +99,32 @@ type Plan struct {
 		Evidence  []PlanEvidence `json:"evidence"`
 		PR        PlanPR         `json:"pull_request"`
 	} `json:"external_contribution"`
+
+	// CollaborationDemo adds independently owned projects and accounts to the
+	// primary research campaign. These records are kept beside the canonical
+	// project rather than folded into its scientific story: each project is
+	// created and written by its own signed-in account through the product API.
+	CollaborationDemo     PlanCollaborationDemo `json:"collaboration_demo"`
+	PresentationRevisions []PlanVersion         `json:"presentation_revisions"`
+	PresentationRelations []PlanRelation        `json:"presentation_relations"`
+}
+
+type PlanCollaborationDemo struct {
+	Organizations []PlanOrg         `json:"organizations"`
+	Users         []PlanUser        `json:"users"`
+	Projects      []PlanDemoProject `json:"projects"`
+}
+
+type PlanDemoProject struct {
+	Key       string         `json:"key"`
+	Slug      string         `json:"slug"`
+	Name      string         `json:"name"`
+	Purpose   string         `json:"purpose"`
+	Org       string         `json:"org"`
+	Owner     string         `json:"owner"`
+	Objects   []PlanObject   `json:"objects"`
+	Relations []PlanRelation `json:"relations"`
+	Assets    []PlanAsset    `json:"assets"`
 }
 
 type PlanOrg struct {
@@ -114,6 +141,7 @@ type PlanUser struct {
 	DisplayName string `json:"display_name"`
 	Password    string `json:"password"`
 	Org         string `json:"org"`
+	OrgRole     string `json:"org_role"`
 }
 
 type PlanBranch struct {
@@ -154,8 +182,9 @@ type PlanObject struct {
 // PlanFile is one synthetic data file: a media type and its bytes, written
 // out as a JSON string so the plan stays one readable document.
 type PlanFile struct {
-	MediaType string `json:"media_type"`
-	Content   string `json:"content"`
+	MediaType   string `json:"media_type"`
+	Content     string `json:"content"`
+	ContentPath string `json:"content_path"`
 }
 
 type PlanVersion struct {
@@ -216,6 +245,8 @@ type PlanAsset struct {
 	Object           string         `json:"object"`
 	Title            string         `json:"title"`
 	Slug             string         `json:"slug"`
+	Creators         []string       `json:"creators"`
+	Dependencies     []string       `json:"dependencies"`
 	ManifestMetadata map[string]any `json:"manifest_metadata"`
 }
 
@@ -243,7 +274,78 @@ func LoadPlan(path string) (*Plan, error) {
 	if p.Project.Slug == "" {
 		return nil, fmt.Errorf("plan %s has no project.slug", path)
 	}
+	for _, objects := range p.fileBearingObjectLists() {
+		for i := range objects {
+			if objects[i].File == nil || objects[i].File.ContentPath == "" {
+				continue
+			}
+			if filepath.IsAbs(objects[i].File.ContentPath) {
+				return nil, fmt.Errorf("plan %s has an absolute fixture path %q", path, objects[i].File.ContentPath)
+			}
+			content, err := readPlanFixture(path, objects[i].File.ContentPath)
+			if err != nil {
+				return nil, fmt.Errorf("read fixture %q for object %s: %w", objects[i].File.ContentPath, objects[i].Key, err)
+			}
+			objects[i].File.Content = string(content)
+		}
+	}
 	return &p, nil
+}
+
+// readPlanFixture resolves fixture paths relative to the plan when the plan
+// lives in the repository, and relative to the current checkout when the
+// plan has been copied to a temporary directory (as mutation-check does).
+func readPlanFixture(planPath, relative string) ([]byte, error) {
+	planDir, _ := filepath.Abs(filepath.Dir(planPath))
+	workingDir, _ := os.Getwd()
+	starts := []string{planDir, workingDir}
+	seen := map[string]bool{}
+	var candidates []string
+	add := func(path string) {
+		path = filepath.Clean(path)
+		if !seen[path] {
+			seen[path] = true
+			candidates = append(candidates, path)
+		}
+	}
+	for _, start := range starts {
+		if start == "" {
+			continue
+		}
+		add(filepath.Join(start, relative))
+		for dir := start; ; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				add(filepath.Join(dir, relative))
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+	var lastErr error
+	for _, candidate := range candidates {
+		content, err := os.ReadFile(candidate)
+		if err == nil {
+			return content, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("tried %s: %w", strings.Join(candidates, ", "), lastErr)
+}
+
+// fileBearingObjectLists returns slices backed by the parsed plan, so fixture
+// contents are hydrated in place for the existing builder and verifier.
+func (p *Plan) fileBearingObjectLists() [][]PlanObject {
+	lists := [][]PlanObject{p.MainObjects, p.MainConclusions, p.External.Objects}
+	for _, content := range p.BranchesContent {
+		lists = append(lists, content.Objects)
+	}
+	for i := range p.CollaborationDemo.Projects {
+		lists = append(lists, p.CollaborationDemo.Projects[i].Objects)
+	}
+	return lists
 }
 
 // publishRef returns the publication the plan declares for an object key.
@@ -257,8 +359,7 @@ func (p *Plan) publishRef(key string) (PlanPublishRef, bool) {
 }
 
 // ObjectKeys returns every object key the plan declares, across the main
-// section, each branch's section and the external contribution — the set the
-// verifier walks.
+// project, branch sections, external contribution and collaboration projects.
 func (p *Plan) ObjectKeys() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -281,6 +382,11 @@ func (p *Plan) ObjectKeys() []string {
 	}
 	for _, o := range p.External.Objects {
 		add(o)
+	}
+	for _, project := range p.CollaborationDemo.Projects {
+		for _, o := range project.Objects {
+			add(o)
+		}
 	}
 	return out
 }
@@ -309,7 +415,15 @@ func (p *Plan) ObjectByKey(key string) (PlanObject, bool) {
 			return o, true
 		}
 	}
-	return search(p.External.Objects)
+	if o, ok := search(p.External.Objects); ok {
+		return o, true
+	}
+	for _, project := range p.CollaborationDemo.Projects {
+		if o, ok := search(project.Objects); ok {
+			return o, true
+		}
+	}
+	return PlanObject{}, false
 }
 
 // branchContentNames lists the plan's branch sections in a stable order, so

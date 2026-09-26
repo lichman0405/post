@@ -45,7 +45,9 @@ target database, and drives that process over HTTP.
    exactly what it deletes. Without the flag the existing database is used.
 4. **Migrations** — `rddev db migrate` applies `infra/migrations/**`.
 5. **API** — `go build ./cmd/api`, start, wait for `/healthz`.
-6. **Build** — `seeddemo build` drives the plan through that API (below).
+6. **Build** — `seeddemo build` drives the plan through that API (below),
+   including eight normal login accounts, the source project, two separate
+   collaboration projects, the external fork, and the published assets.
 7. **Verify** — `seeddemo verify` measures the result **by querying
    PostgreSQL**, never by reading the builder's return value. Every check
    carries the SQL it ran.
@@ -74,6 +76,10 @@ reader can check item by item.
 The verifier independently checks the API claim: every object version in the
 project must be backed by a `state_commits` row whose `via` is `'api'`. A row
 written by a script or a fixture loader fails that check.
+
+It also checks that the full run left eight distinct demo login rows and both
+additional public collaboration projects. `--external 0` is a reduced mode and
+expects seven accounts; it does not represent the complete eight-role demo.
 
 ## Reading a result
 

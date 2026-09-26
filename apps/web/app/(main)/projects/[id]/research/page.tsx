@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Spinner } from "@primer/react";
 import { useT } from "../../../../i18n-provider";
 import { useProjectShell } from "../shell-context";
+import { demoEnglishText } from "../../../../../lib/demo-english";
 import "./research.css";
 
 type Linked = { object_id: string; object_type: string; title: string };
@@ -16,7 +17,7 @@ type Overview = {
   key_questions: Question[];
   key_findings: Finding[];
   branches: { active: Branch[]; merged: number; aborted: number };
-  current_main: { head_state_id: string; latest_commit: { message: string; actor: string } } | null;
+  current_main: { head_state_id?: string; latest_commit?: { message: string; actor: string } } | null;
   empty: boolean;
 };
 
@@ -60,7 +61,7 @@ export default function ResearchPage() {
     <div className="research-workspace" data-project-tab-content="research">
       <section className="research-hero">
         <div><p className="research-eyebrow">{t("research.eyebrow")}</p><h2>{t("research.title")}</h2><p>{t("research.intro")}</p></div>
-        {overview.current_main ? <div className="research-head"><span>{t("research.mainHead")}</span><code>{overview.current_main.head_state_id.slice(0, 8)}</code><small>{overview.current_main.latest_commit.message} · {overview.current_main.latest_commit.actor}</small></div> : null}
+        {overview.current_main?.head_state_id ? <div className="research-head"><span>{t("research.mainHead")}</span><code>{overview.current_main.head_state_id.slice(0, 8)}</code>{overview.current_main.latest_commit ? <small>{overview.current_main.latest_commit.message} · {overview.current_main.latest_commit.actor}</small> : null}</div> : null}
       </section>
 
       <section className="research-counts" aria-label={t("research.countsLabel")}>
@@ -80,13 +81,13 @@ export default function ResearchPage() {
           {overview.key_findings.map((finding) => <article className="research-card finding-card" key={finding.object_id}>
             <div className="research-card-heading"><span className={`research-pill ${finding.assessment}`}>{humanize(finding.assessment)}</span><span className="research-ref">{humanize(finding.finding_type)}</span></div>
             <h4>{finding.statement}</h4>
-            <div className="claim-list"><h5>{t("research.claimBasis")}</h5>{finding.claims.map((claim) => <div className="claim-row" key={claim.version_id}><span aria-hidden="true">{claim.resolved ? "✓" : "?"}</span><p>{claim.title}</p></div>)}</div>
+            <div className="claim-list"><h5>{t("research.claimBasis")}</h5>{finding.claims.map((claim) => <div className="claim-row" key={claim.version_id}><span aria-hidden="true">{claim.resolved ? "✓" : "?"}</span><p>{shell.project.slug === "demo-mof-humidity-separation" ? demoEnglishText(claim.title) : claim.title}</p></div>)}</div>
           </article>)}
         </div></section>
       </div>
 
       <section className="research-panel branch-panel"><header><p className="research-eyebrow">{t("research.branches.eyebrow")}</p><h3>{t("research.branches.title")}</h3></header><div className="branch-grid">
-        {overview.branches.active.map((branch) => <article className="branch-card" key={branch.id}><div><span className="branch-mark">⑂</span><h4>{branch.name}</h4></div><p>{branch.purpose}</p><small>{t("research.branchHead")}{" "}{branch.head_state_id.slice(0, 8)}</small></article>)}
+        {overview.branches.active.map((branch) => <article className="branch-card" key={branch.id}><div><span className="branch-mark">⑂</span><h4>{branch.name}</h4></div><p>{shell.project.slug === "demo-mof-humidity-separation" ? demoEnglishText(branch.purpose) : branch.purpose}</p>{branch.head_state_id ? <small>{t("research.branchHead")}{" "}{branch.head_state_id.slice(0, 8)}</small> : null}</article>)}
       </div></section>
     </div>
   );

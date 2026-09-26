@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { StatusPanel } from "./status-panel";
 import type { ServiceStatus } from "./status-panel";
 import { AuthStatus } from "./auth-status";
+import { DemoLanding } from "./demo-landing";
 import { getWebConfig } from "../../lib/server-config";
 import { describeConfig } from "../../lib/config";
 import { CORRELATION_HEADER, correlationHeaders, resolveCorrelationId } from "../../lib/correlation";
@@ -122,12 +123,12 @@ export default async function Home() {
 
   return (
     <div>
-      <StatusPanel
-        webVersion={pkg.version}
-        services={services}
-        correlationId={correlationId}
-      />
-      <AuthStatus apiBaseUrl={cfg.apiBaseUrl} />
+      <DemoLanding apiBaseUrl={cfg.apiBaseUrl} />
+      <details style={{ maxWidth: 1180, margin: "0 auto 32px", padding: "0 20px" }}>
+        <summary>Service status</summary>
+        <StatusPanel webVersion={pkg.version} services={services} correlationId={correlationId} />
+        <AuthStatus apiBaseUrl={cfg.apiBaseUrl} />
+      </details>
     </div>
   );
 }

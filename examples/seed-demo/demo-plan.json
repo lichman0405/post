@@ -43,7 +43,7 @@
   "project": {
     "slug": "demo-mof-humidity-separation",
     "name": "MOF-X humidity separation (synthetic demo)",
-    "purpose": "验证 MOF-X 在高湿环境下的 C2H4/C2H6 separation performance（docs/34 清单；全部为 synthetic 演示数据）",
+    "purpose": "Synthetic study of MOF-X ethylene/ethane separation at 298 K under dry, 40% RH, and 70% RH conditions.",
     "visibility": "public",
     "org": "lab"
   },
@@ -52,25 +52,25 @@
       "name": "humidity-40rh",
       "visibility": "public",
       "base": "main",
-      "purpose": "40% RH 工况下的选择性测量（synthetic）"
+      "purpose": "Synthetic 40% RH selectivity measurements"
     },
     {
       "name": "humidity-70rh",
       "visibility": "public",
       "base": "main",
-      "purpose": "70% RH 工况下的选择性测量（synthetic）"
+      "purpose": "Synthetic 70% RH selectivity measurements"
     },
     {
       "name": "protocol-activation-180c",
       "visibility": "public",
       "base": "main",
-      "purpose": "把活化温度改为 180 °C 的协议分支（synthetic；与 main 的科学冲突）"
+      "purpose": "Alternative 180 °C activation protocol; a scientific conflict with main"
     },
     {
       "name": "mechanism-water-binding",
       "visibility": "private",
       "base": "main",
-      "purpose": "机理分支：水竞争吸附 vs 骨架降解（synthetic；private branch）"
+      "purpose": "Competing mechanisms: water adsorption versus framework degradation"
     }
   ],
   "review_routing": {
@@ -100,7 +100,7 @@
       "type": "research_question",
       "branch": "main",
       "payload": {
-        "statement": "MOF-X 在 298 K、40–70% RH 下是否仍保持 C2H4/C2H6 separation selectivity？",
+        "statement": "Does MOF-X retain C2H4/C2H6 separation selectivity at 298 K and 40–70% relative humidity?",
         "purpose": "The project's driving question (docs/34 §Research Question).",
         "question_state": "open",
         "scope": {
@@ -121,7 +121,7 @@
       "type": "hypothesis",
       "branch": "main",
       "payload": {
-        "statement": "湿气条件下的性能下降主要来自 water competitive adsorption at the open metal sites。",
+        "statement": "The humidity-related selectivity loss is mainly caused by competitive water adsorption at open metal sites.",
         "question_id": "@rq-q1",
         "hypothesis_type": "mechanistic",
         "assessment": "under_test",
@@ -139,7 +139,7 @@
       "type": "hypothesis",
       "branch": "main",
       "payload": {
-        "statement": "湿气条件下的性能下降来自 partial framework degradation（骨架水解）。",
+        "statement": "The humidity-related selectivity loss is mainly caused by partial framework degradation or hydrolysis.",
         "question_id": "@rq-q1",
         "hypothesis_type": "mechanistic",
         "assessment": "under_test",
@@ -363,6 +363,51 @@
         "accessed_at": "2026-01-09T15:40:00Z",
         "snapshot_hash": "sha256:91ab77e0c3d4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
       }
+    },
+    {
+      "key": "ds-replicates-dry",
+      "type": "dataset",
+      "branch": "main",
+      "payload": {
+        "purpose": "Three replicate dry-gas isotherms used by the demo's adsorption comparison chart",
+        "data_type": "adsorption isotherm",
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 at each pressure point; values are illustrative, not measured."
+      },
+      "file": {
+        "media_type": "text/csv",
+        "content_path": "apps/web/public/demo-data/adsorption-dry.csv"
+      }
+    },
+    {
+      "key": "ds-replicates-40",
+      "type": "dataset",
+      "branch": "main",
+      "payload": {
+        "purpose": "Three replicate 40% RH isotherms used by the demo's adsorption comparison chart",
+        "data_type": "adsorption isotherm",
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 at each pressure point; values are illustrative, not measured."
+      },
+      "file": {
+        "media_type": "text/csv",
+        "content_path": "apps/web/public/demo-data/adsorption-40rh.csv"
+      }
+    },
+    {
+      "key": "ds-replicates-70",
+      "type": "dataset",
+      "branch": "main",
+      "payload": {
+        "purpose": "Three replicate 70% RH isotherms used by the demo's adsorption comparison chart",
+        "data_type": "adsorption isotherm",
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 at each pressure point; values are illustrative, not measured."
+      },
+      "file": {
+        "media_type": "text/csv",
+        "content_path": "apps/web/public/demo-data/adsorption-70rh.csv"
+      }
     }
   ],
   "main_conclusions": [
@@ -371,7 +416,7 @@
       "type": "claim",
       "branch": "main",
       "payload": {
-        "statement": "在 298 K 干气条件下，MOF-X 的 C2H4/C2H6 IAST selectivity 为 12.4 ± 0.6。",
+        "statement": "At 298 K under dry conditions, the synthetic MOF-X C2H4/C2H6 IAST selectivity is 12.4 ± 0.6.",
         "claim_type": "quantitative",
         "subject_ref": "@mat-mof-x",
         "property": "IAST selectivity",
@@ -411,7 +456,7 @@
       "key": "claim-c2",
       "type": "claim",
       "payload": {
-        "statement": "在 40% RH、298 K 下 MOF-X 的 C2H4/C2H6 selectivity 保持在干气值的 90% 以上。",
+        "statement": "At 40% RH and 298 K, MOF-X retains at least 90% of its dry-gas selectivity in the synthetic campaign.",
         "claim_type": "quantitative",
         "subject_ref": "@smp-mx-40-01",
         "property": "IAST selectivity",
@@ -453,7 +498,7 @@
       "type": "finding",
       "branch": "main",
       "payload": {
-        "statement": "干气条件下 3 次独立 IAST 计算的选择性重复性良好（RSD 4.8%），基线与文献量级一致。",
+        "statement": "Three independent dry-gas IAST calculations show good selectivity repeatability (RSD 4.8%) in the synthetic baseline.",
         "finding_type": "observation",
         "claim_version_refs": [
           "@vlist:claim-c1"
@@ -544,6 +589,11 @@
       "type": "references",
       "source": "calc-dft-water-cu",
       "target": "ref-water-stability"
+    },
+    {
+      "type": "derived_from",
+      "source": "ds-replicates-dry",
+      "target": "exp-dry-01"
     }
   ],
   "conclusion_relations": [
@@ -787,6 +837,11 @@
           "type": "derived_from",
           "source": "ds-breakthrough-40",
           "target": "exp-40-02"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-replicates-40",
+          "target": "exp-40-01"
         }
       ],
       "evidence": []
@@ -942,7 +997,7 @@
           "key": "claim-c3",
           "type": "claim",
           "payload": {
-            "statement": "在 70% RH、298 K 下 MOF-X 的 C2H4/C2H6 selectivity 相对干气下降约 60%。",
+            "statement": "At 70% RH and 298 K, synthetic MOF-X C2H4/C2H6 selectivity is approximately 60% lower than the dry baseline.",
             "claim_type": "quantitative",
             "subject_ref": "@smp-mx-70-01",
             "property": "IAST selectivity",
@@ -982,7 +1037,7 @@
           "key": "find-f3",
           "type": "finding",
           "payload": {
-            "statement": "70% RH 下容量损失随循环次数单调增加（1.8% → 12.6%），不像纯竞争吸附那样可逆。",
+            "statement": "At 70% RH, capacity loss increases across cycles (1.8% to 12.6%), which is inconsistent with fully reversible competitive adsorption alone.",
             "finding_type": "trend",
             "claim_version_refs": [
               "@vlist:claim-c3"
@@ -1031,6 +1086,11 @@
           "type": "references",
           "source": "calc-degradation-fe",
           "target": "ref-water-stability"
+        },
+        {
+          "type": "derived_from",
+          "source": "ds-replicates-70",
+          "target": "exp-70-01"
         }
       ],
       "evidence": [
@@ -1198,7 +1258,7 @@
           "key": "claim-c4",
           "type": "claim",
           "payload": {
-            "statement": "70% RH 下的选择性损失主要来自水分子在开放 Cu 位点的竞争吸附。",
+            "statement": "The 70% RH selectivity loss is primarily due to water competing for open Cu sites.",
             "claim_type": "mechanistic",
             "subject_ref": "@mat-mof-x-aged",
             "property": "selectivity_loss_mechanism",
@@ -1218,7 +1278,7 @@
           "key": "claim-c5",
           "type": "claim",
           "payload": {
-            "statement": "70% RH 循环后 MOF-X 出现约 22 wt% 的部分水解相。",
+            "statement": "After cycling at 70% RH, synthetic MOF-X retains about 22 wt% residual water.",
             "claim_type": "descriptive",
             "subject_ref": "@mat-mof-x-aged",
             "property": "hydrolysis_fraction",
@@ -1238,7 +1298,7 @@
           "key": "claim-c6",
           "type": "claim",
           "payload": {
-            "statement": "70% RH 下 MOF-X 选择性下降由水的竞争吸附主导，而非骨架降解。",
+            "statement": "Water competition explains the 70% RH selectivity loss more strongly than framework degradation.",
             "claim_type": "causal",
             "subject_ref": "@mat-mof-x-aged",
             "property": "selectivity_loss_cause",
@@ -1263,7 +1323,7 @@
           "key": "find-f2",
           "type": "finding",
           "payload": {
-            "statement": "综合 DFT 竞争吸附计算与 PXRD 两相拟合：竞争吸附解释约 60% 的选择性损失，骨架降解解释其余部分——两者都成立，主因仍有争议。",
+            "statement": "The synthetic DFT and PXRD interpretations jointly suggest that water competition explains about 60% of the selectivity loss, with framework change contributing to the remainder; the dominant mechanism remains contested.",
             "finding_type": "integrated_conclusion",
             "claim_version_refs": [
               "@vlist:claim-c4",
@@ -1445,11 +1505,35 @@
   ],
   "assets": [
     {
+      "key": "asset-dataset-dry",
+      "asset_type": "dataset",
+      "object": "ds-replicates-dry",
+      "title": "Dry-gas adsorption isotherms · three replicates (synthetic)",
+      "slug": "seed-demo-dry-isotherm-replicates",
+      "creators": [
+        "owner",
+        "experimenter"
+      ],
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: dry-gas C2H4/C2H6 isotherms with three replicate runs",
+        "data_type": "adsorption isotherm",
+        "blob_ids": [
+          "@blob:ds-replicates-dry"
+        ],
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 per pressure point."
+      }
+    },
+    {
       "key": "asset-dataset",
       "asset_type": "dataset",
       "object": "ds-iso-40",
       "title": "40% RH isotherm dataset (synthetic)",
       "slug": "seed-demo-40rh-isotherm",
+      "creators": [
+        "experimenter",
+        "curator"
+      ],
       "manifest_metadata": {
         "purpose": "Synthetic demo asset: 40% RH C2H4/C2H6 isotherms",
         "data_type": "adsorption isotherm",
@@ -1461,11 +1545,54 @@
       }
     },
     {
+      "key": "asset-dataset-40-replicates",
+      "asset_type": "dataset",
+      "object": "ds-replicates-40",
+      "title": "40% RH adsorption isotherms · three replicates (synthetic)",
+      "slug": "seed-demo-40rh-isotherm-replicates",
+      "creators": [
+        "experimenter",
+        "curator"
+      ],
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: three 40% RH C2H4/C2H6 isotherm replicates",
+        "data_type": "adsorption isotherm",
+        "blob_ids": [
+          "@blob:ds-replicates-40"
+        ],
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 per pressure point."
+      }
+    },
+    {
+      "key": "asset-dataset-70",
+      "asset_type": "dataset",
+      "object": "ds-replicates-70",
+      "title": "70% RH adsorption isotherms · three replicates (synthetic)",
+      "slug": "seed-demo-70rh-isotherm-replicates",
+      "creators": [
+        "experimenter",
+        "curator"
+      ],
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: 70% RH C2H4/C2H6 isotherms with three replicate runs",
+        "data_type": "adsorption isotherm",
+        "blob_ids": [
+          "@blob:ds-replicates-70"
+        ],
+        "access_level": "open",
+        "quality_notes": "Synthetic fixture; n=3 per pressure point."
+      }
+    },
+    {
       "key": "asset-protocol",
       "asset_type": "protocol",
       "object": "proto-activation",
       "title": "MOF-X activation protocol (synthetic)",
       "slug": "seed-demo-activation-protocol",
+      "creators": [
+        "curator"
+      ],
       "manifest_metadata": {
         "purpose": "Synthetic demo asset: the thermal activation protocol",
         "domain": "materials chemistry",
@@ -1492,6 +1619,10 @@
       "object": "mat-mof-x",
       "title": "MOF-X material collection (synthetic)",
       "slug": "seed-demo-mofx-collection",
+      "creators": [
+        "owner",
+        "curator"
+      ],
       "manifest_metadata": {
         "purpose": "Synthetic demo asset: the MOF-X material family as collected for this project",
         "member_refs": [
@@ -1503,11 +1634,39 @@
       }
     },
     {
+      "key": "asset-material-collection-linked",
+      "asset_type": "material_collection",
+      "object": "mat-mof-x",
+      "title": "MOF-X study collection with protocol pin (synthetic)",
+      "slug": "seed-demo-mofx-collection-linked",
+      "creators": [
+        "owner",
+        "curator"
+      ],
+      "dependencies": [
+        "asset-protocol"
+      ],
+      "manifest_metadata": {
+        "purpose": "Synthetic demo asset: MOF-X material family and the exact activation protocol used",
+        "member_refs": [
+          "@mat-mof-x",
+          "@mat-mof-y"
+        ],
+        "selection_criteria": "Synthetic demo samples characterized and measured with the pinned MOF-X activation protocol.",
+        "custodian": "demo-mof-lab (synthetic)"
+      }
+    },
+    {
       "key": "asset-benchmark",
       "asset_type": "benchmark",
       "object": "ds-iso-70",
       "title": "40/70% RH humidity benchmark (synthetic)",
       "slug": "seed-demo-humidity-benchmark",
+      "creators": [
+        "owner",
+        "computational",
+        "reviewer"
+      ],
       "manifest_metadata": {
         "purpose": "Synthetic demo asset: the 40%/70% RH selectivity benchmark other groups can re-run",
         "task": "C2H4/C2H6 IAST selectivity at 298 K under 0/40/70% RH",
@@ -1520,6 +1679,37 @@
           "@ds-iso-40",
           "@ds-iso-70"
         ]
+      }
+    },
+    {
+      "key": "asset-benchmark-linked",
+      "asset_type": "benchmark",
+      "object": "ds-replicates-70",
+      "title": "Humidity benchmark with pinned replicate datasets (synthetic)",
+      "slug": "seed-demo-humidity-benchmark-linked",
+      "creators": [
+        "owner",
+        "computational",
+        "reviewer"
+      ],
+      "dependencies": [
+        "asset-dataset-dry",
+        "asset-dataset-40-replicates",
+        "asset-dataset-70"
+      ],
+      "manifest_metadata": {
+        "purpose": "Synthetic demo benchmark: reproduce C2H4/C2H6 adsorption trends across 0/40/70% RH",
+        "task": "Compare adsorption isotherms at 298 K and calculate IAST selectivity",
+        "metrics": [
+          "iast_selectivity",
+          "relative_humidity_pct"
+        ],
+        "dataset_refs": [
+          "@ds-replicates-dry",
+          "@ds-replicates-40",
+          "@ds-replicates-70"
+        ],
+        "quality_notes": "All referenced measurements are synthetic fixtures; no real experiment was run."
       }
     }
   ],
@@ -1613,7 +1803,7 @@
       "object": "hyp-h1",
       "branch": "main",
       "patch": {
-        "statement": "湿气条件下的性能下降主要来自 water competitive adsorption at the open metal sites；40% RH 数据把范围收窄到 open-metal-site 竞争吸附。",
+        "statement": "The humidity-related selectivity loss is mainly caused by competitive water adsorption at open metal sites.",
         "assessment": "under_test"
       }
     },
@@ -1621,8 +1811,547 @@
       "object": "hyp-h2",
       "branch": "main",
       "patch": {
-        "statement": "湿气条件下的性能下降来自 partial framework degradation（骨架水解）；70% RH 的 PXRD 结果把该假设收窄到多次循环后的部分降解。",
+        "statement": "The humidity-related selectivity loss is mainly caused by partial framework degradation or hydrolysis.",
         "assessment": "under_test"
+      }
+    }
+  ],
+  "collaboration_demo": {
+    "organizations": [
+      {
+        "key": "northbridge",
+        "slug": "demo-northbridge-computation",
+        "name": "Northbridge Computational Materials Center (synthetic)",
+        "description": "Synthetic university center contributing calculations and transferability analysis."
+      },
+      {
+        "key": "westhaven",
+        "slug": "demo-westhaven-adsorption",
+        "name": "Westhaven University Adsorption Group (synthetic)",
+        "description": "Synthetic independent laboratory contributing replication measurements and review."
+      }
+    ],
+    "users": [
+      {
+        "key": "curator",
+        "email": "demo.curator@example.invalid",
+        "handle": "demo-curator",
+        "display_name": "Lin Qiao · Data curator (synthetic)",
+        "password": "seed-demo-curator-pw-1",
+        "org": "lab",
+        "org_role": "contributor"
+      },
+      {
+        "key": "experimenter",
+        "email": "demo.experimenter@example.invalid",
+        "handle": "demo-experimenter",
+        "display_name": "Mei Chen · Experimental scientist (synthetic)",
+        "password": "seed-demo-experimenter-pw-1",
+        "org": "lab",
+        "org_role": "contributor"
+      },
+      {
+        "key": "computational",
+        "email": "demo.computational@example.invalid",
+        "handle": "demo-computational",
+        "display_name": "Arun Rao · Computational scientist (synthetic)",
+        "password": "seed-demo-computational-pw-1",
+        "org": "northbridge",
+        "org_role": "maintainer"
+      },
+      {
+        "key": "replication-lead",
+        "email": "demo.replication@example.invalid",
+        "handle": "demo-replication",
+        "display_name": "Eva Lin · Replication lead (synthetic)",
+        "password": "seed-demo-replication-pw-1",
+        "org": "westhaven",
+        "org_role": "maintainer"
+      },
+      {
+        "key": "reviewer",
+        "email": "demo.reviewer@example.invalid",
+        "handle": "demo-reviewer",
+        "display_name": "Noah Zhou · Benchmark reviewer (synthetic)",
+        "password": "seed-demo-reviewer-pw-1",
+        "org": "westhaven",
+        "org_role": "viewer"
+      },
+      {
+        "key": "viewer",
+        "email": "demo.viewer@example.invalid",
+        "handle": "demo-viewer",
+        "display_name": "Ava Wu · Read-only observer (synthetic)",
+        "password": "seed-demo-viewer-pw-1",
+        "org": "northbridge",
+        "org_role": "viewer"
+      }
+    ],
+    "projects": [
+      {
+        "key": "replication",
+        "slug": "demo-mofx-independent-replication",
+        "name": "MOF-X independent humidity replication (synthetic)",
+        "purpose": "An independent university group repeats the 70% RH experiment with a separately prepared sample and records a result that does not reproduce the source trend.",
+        "org": "westhaven",
+        "owner": "replication-lead",
+        "objects": [
+          {
+            "key": "rep-question",
+            "type": "research_question",
+            "branch": "main",
+            "payload": {
+              "statement": "Does the MOF-X/C2H4-C2H6 selectivity loss at 70% RH reproduce with an independently prepared sample?",
+              "purpose": "Synthetic independent-replication question.",
+              "question_state": "open",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  70
+                ],
+                "gas_pair": [
+                  "C2H4",
+                  "C2H6"
+                ]
+              }
+            }
+          },
+          {
+            "key": "rep-protocol",
+            "type": "protocol",
+            "branch": "main",
+            "payload": {
+              "purpose": "Independent MOF-X activation and humid-gas adsorption protocol",
+              "domain": "materials chemistry",
+              "steps": [
+                "dry powder at 80 C for 2 h",
+                "evacuate and ramp to 180 C at 1 K/min",
+                "hold 6 h under vacuum and cool under vacuum"
+              ],
+              "parameters": {
+                "temperature_c": 180,
+                "duration_h": 6,
+                "atmosphere": "vacuum",
+                "ramp_k_per_min": 1
+              },
+              "requirements": [
+                "Schlenk line",
+                "oil-free vacuum pump"
+              ]
+            }
+          },
+          {
+            "key": "rep-exp-70",
+            "type": "experiment",
+            "branch": "main",
+            "payload": {
+              "objective": "Independent repeat of the 70% RH C2H4/C2H6 adsorption measurement",
+              "conditions": {
+                "temperature_k": 298,
+                "relative_humidity_pct": 70,
+                "carrier": "He",
+                "activation_c": 180,
+                "activation_hold_h": 6
+              },
+              "operator_ids": [
+                "@user:replication-lead"
+              ],
+              "sample_ids": [
+                "synthetic-sample-wh-70-01"
+              ],
+              "protocol_version_id": "@v:rep-protocol",
+              "result_summary": "Synthetic: this independent sample retains a different selectivity profile from the source campaign."
+            }
+          },
+          {
+            "key": "rep-dataset-70",
+            "type": "dataset",
+            "branch": "main",
+            "payload": {
+              "purpose": "Three synthetic replicate isotherms for the independent 70% RH campaign",
+              "data_type": "adsorption isotherm",
+              "access_level": "open",
+              "quality_notes": "Synthetic fixture; three replicate runs, not measured laboratory data."
+            },
+            "file": {
+              "media_type": "text/csv",
+              "content_path": "apps/web/public/demo-data/replication-70rh.csv"
+            }
+          },
+          {
+            "key": "rep-finding-70",
+            "type": "finding",
+            "branch": "main",
+            "payload": {
+              "statement": "The independent 70% RH run does not reproduce the source campaign's magnitude of selectivity change; sample activation history remains a plausible contributor.",
+              "finding_type": "replication_outcome",
+              "question_id": "@rep-question",
+              "assessment": "contested"
+            }
+          },
+          {
+            "key": "rep-hyp-activation",
+            "type": "hypothesis",
+            "branch": "main",
+            "payload": {
+              "statement": "Different activation history explains the disagreement with the source campaign.",
+              "question_id": "@rep-question",
+              "hypothesis_type": "mechanistic",
+              "assessment": "under_test",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  70
+                ]
+              }
+            }
+          },
+          {
+            "key": "rep-hyp-sample",
+            "type": "hypothesis",
+            "branch": "main",
+            "payload": {
+              "statement": "Sample-to-sample variation explains the disagreement even under the same activation protocol.",
+              "question_id": "@rep-question",
+              "hypothesis_type": "mechanistic",
+              "assessment": "under_test",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  70
+                ]
+              }
+            }
+          }
+        ],
+        "relations": [
+          {
+            "type": "derived_from",
+            "source": "rep-dataset-70",
+            "target": "rep-exp-70"
+          },
+          {
+            "type": "follows_protocol",
+            "source": "rep-exp-70",
+            "target": "rep-protocol"
+          },
+          {
+            "type": "tests_hypothesis",
+            "source": "rep-exp-70",
+            "target": "rep-hyp-activation"
+          },
+          {
+          "type": "tests_hypothesis",
+          "source": "rep-exp-70",
+          "target": "rep-hyp-sample"
+        },
+        {
+          "type": "addresses_question",
+          "source": "rep-hyp-activation",
+          "target": "rep-question"
+        },
+        {
+          "type": "addresses_question",
+          "source": "rep-hyp-sample",
+          "target": "rep-question"
+        },
+        {
+          "type": "addresses_question",
+          "source": "rep-finding-70",
+          "target": "rep-question"
+          }
+        ],
+        "assets": [
+          {
+            "key": "asset-replication-70",
+            "asset_type": "dataset",
+            "object": "rep-dataset-70",
+            "title": "Independent 70% RH MOF-X replicate isotherms (synthetic)",
+            "slug": "demo-independent-mofx-70rh-replicates",
+            "creators": ["replication-lead"],
+            "dependencies": [],
+            "manifest_metadata": {
+              "purpose": "Independently prepared synthetic MOF-X sample at 298 K and 70% RH; three replicate adsorption isotherms",
+              "data_type": "adsorption isotherm",
+              "blob_ids": ["@blob:rep-dataset-70"],
+              "access_level": "open",
+              "quality_notes": "Synthetic fixture only; the disagreement with the source campaign is intentionally retained."
+            }
+          }
+        ]
+      },
+      {
+        "key": "transferability",
+        "slug": "demo-mofy-transferability-study",
+        "name": "MOF-Y transferability and computational study (synthetic)",
+        "purpose": "A computational materials group tests whether the source project's adsorption interpretation transfers to an isostructural synthetic analogue.",
+        "org": "northbridge",
+        "owner": "computational",
+        "objects": [
+          {
+            "key": "transfer-question",
+            "type": "research_question",
+            "branch": "main",
+            "payload": {
+              "statement": "Does the water-competition interpretation transfer from synthetic MOF-X to its MOF-Y analogue?",
+              "purpose": "Synthetic transferability question.",
+              "question_state": "open",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  40,
+                  70
+                ],
+                "gas_pair": [
+                  "C2H4",
+                  "C2H6"
+                ]
+              }
+            }
+          },
+          {
+            "key": "transfer-material",
+            "type": "material",
+            "branch": "main",
+            "payload": {
+              "name": "MOF-Y",
+              "formula": "Zn4O(BDC)3",
+              "material_family": "metal-organic framework",
+              "aliases": [
+                "synthetic analogue for transferability demo"
+              ],
+              "identifiers": {
+                "demo_id": "synthetic-mof-y-transfer"
+              }
+            }
+          },
+          {
+            "key": "transfer-calculation",
+            "type": "calculation",
+            "branch": "main",
+            "payload": {
+              "objective": "Compare predicted water and ethylene site occupancy in MOF-Y at 70% RH",
+              "input_object_ids": [
+                "@transfer-material"
+              ],
+              "method": "synthetic periodic DFT comparison, PBE-D3",
+              "software": "VASP (synthetic label; no real calculation was run)",
+              "parameters": {
+                "relative_humidity_pct": 70,
+                "temperature_k": 298
+              },
+              "result_summary": "Synthetic: the predicted water occupancy is lower in MOF-Y than in the source MOF-X model."
+            },
+            "file": {
+              "media_type": "text/csv",
+              "content_path": "apps/web/public/demo-data/mofy-transfer.csv"
+            }
+          },
+          {
+            "key": "transfer-finding",
+            "type": "finding",
+            "branch": "main",
+            "payload": {
+              "statement": "The synthetic model suggests partial transferability, with a smaller water-competition effect in MOF-Y; experimental confirmation is still needed.",
+              "finding_type": "transferability_assessment",
+              "assessment": "contested"
+            }
+          },
+          {
+            "key": "transfer-hyp-water",
+            "type": "hypothesis",
+            "branch": "main",
+            "payload": {
+              "statement": "Lower predicted water occupancy in MOF-Y should reduce the humidity penalty relative to MOF-X.",
+              "question_id": "@transfer-question",
+              "hypothesis_type": "mechanistic",
+              "assessment": "under_test",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  40,
+                  70
+                ]
+              }
+            }
+          },
+          {
+            "key": "transfer-hyp-framework",
+            "type": "hypothesis",
+            "branch": "main",
+            "payload": {
+              "statement": "If framework stability dominates, a simple water-occupancy model will not transfer the observed separation trend.",
+              "question_id": "@transfer-question",
+              "hypothesis_type": "mechanistic",
+              "assessment": "under_test",
+              "scope": {
+                "temperature_k": 298,
+                "relative_humidity_pct": [
+                  40,
+                  70
+                ]
+              }
+            }
+          },
+          {
+            "key": "transfer-dataset-occupancy",
+            "type": "dataset",
+            "branch": "main",
+            "payload": {
+              "purpose": "Synthetic MOF-Y predicted water and ethylene site occupancy across humidity conditions",
+              "data_type": "computational model output",
+              "access_level": "open",
+              "quality_notes": "Synthetic fixture; no actual DFT calculation was performed."
+            },
+            "file": { "media_type": "text/csv", "content_path": "apps/web/public/demo-data/mofy-transfer.csv" }
+          }
+        ],
+        "relations": [
+          {
+            "type": "derived_from",
+            "source": "transfer-calculation",
+            "target": "transfer-material"
+          },
+          {
+            "type": "tests_hypothesis",
+            "source": "transfer-calculation",
+            "target": "transfer-hyp-water"
+          },
+          {
+          "type": "tests_hypothesis",
+          "source": "transfer-calculation",
+          "target": "transfer-hyp-framework"
+        },
+        {
+          "type": "addresses_question",
+          "source": "transfer-hyp-water",
+          "target": "transfer-question"
+        },
+        {
+          "type": "addresses_question",
+          "source": "transfer-hyp-framework",
+          "target": "transfer-question"
+        },
+        {
+          "type": "addresses_question",
+          "source": "transfer-finding",
+          "target": "transfer-question"
+        },
+        {
+          "type": "derived_from",
+          "source": "transfer-dataset-occupancy",
+          "target": "transfer-calculation"
+          }
+        ],
+        "assets": [
+          {
+            "key": "asset-mofy-occupancy",
+            "asset_type": "dataset",
+            "object": "transfer-dataset-occupancy",
+            "title": "MOF-Y humidity site-occupancy model output (synthetic)",
+            "slug": "demo-mofy-humidity-site-occupancy",
+            "creators": ["computational"],
+            "dependencies": [],
+            "manifest_metadata": {
+              "purpose": "Synthetic model comparison of predicted water and ethylene site occupancy at 298 K",
+              "data_type": "computational model output",
+              "blob_ids": ["@blob:transfer-dataset-occupancy"],
+              "access_level": "open",
+              "quality_notes": "Synthetic fixture only; no real DFT job was run."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "presentation_relations": [
+    { "type": "addresses_question", "source": "hyp-h1", "target": "rq-q1" },
+    { "type": "addresses_question", "source": "hyp-h2", "target": "rq-q1" },
+    { "type": "addresses_question", "source": "find-f3", "target": "rq-q1" }
+  ],
+  "presentation_revisions": [
+    {
+      "object": "rq-q1",
+      "branch": "main",
+      "patch": {
+        "statement": "Does MOF-X retain C2H4/C2H6 separation selectivity at 298 K and 40–70% relative humidity?"
+      }
+    },
+    {
+      "object": "hyp-h1",
+      "branch": "main",
+      "patch": {
+        "statement": "The humidity-related selectivity loss is mainly caused by competitive water adsorption at open metal sites."
+      }
+    },
+    {
+      "object": "hyp-h2",
+      "branch": "main",
+      "patch": {
+        "statement": "The humidity-related selectivity loss is mainly caused by partial framework degradation or hydrolysis."
+      }
+    },
+    {
+      "object": "claim-c1",
+      "branch": "main",
+      "patch": {
+        "statement": "At 298 K under dry conditions, the synthetic MOF-X C2H4/C2H6 IAST selectivity is 12.4 ± 0.6."
+      }
+    },
+    {
+      "object": "claim-c2",
+      "branch": "main",
+      "patch": {
+        "statement": "At 40% RH and 298 K, MOF-X retains at least 90% of its dry-gas selectivity in the synthetic campaign."
+      }
+    },
+    {
+      "object": "find-f1",
+      "branch": "main",
+      "patch": {
+        "statement": "Three independent dry-gas IAST calculations show good selectivity repeatability (RSD 4.8%) in the synthetic baseline."
+      }
+    },
+    {
+      "object": "claim-c3",
+      "branch": "main",
+      "patch": {
+        "statement": "At 70% RH and 298 K, synthetic MOF-X C2H4/C2H6 selectivity is approximately 60% lower than the dry baseline."
+      }
+    },
+    {
+      "object": "find-f3",
+      "branch": "main",
+      "patch": {
+        "statement": "At 70% RH, capacity loss increases across cycles (1.8% to 12.6%), which is inconsistent with fully reversible competitive adsorption alone."
+      }
+    },
+    {
+      "object": "claim-c4",
+      "branch": "mechanism-water-binding",
+      "patch": {
+        "statement": "The 70% RH selectivity loss is primarily due to water competing for open Cu sites."
+      }
+    },
+    {
+      "object": "claim-c5",
+      "branch": "mechanism-water-binding",
+      "patch": {
+        "statement": "After cycling at 70% RH, synthetic MOF-X retains about 22 wt% residual water."
+      }
+    },
+    {
+      "object": "claim-c6",
+      "branch": "mechanism-water-binding",
+      "patch": {
+        "statement": "Water competition explains the 70% RH selectivity loss more strongly than framework degradation."
+      }
+    },
+    {
+      "object": "find-f2",
+      "branch": "mechanism-water-binding",
+      "patch": {
+        "statement": "The synthetic DFT and PXRD interpretations jointly suggest that water competition explains about 60% of the selectivity loss, with framework change contributing to the remainder; the dominant mechanism remains contested."
       }
     }
   ]
