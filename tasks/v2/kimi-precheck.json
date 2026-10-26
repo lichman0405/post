@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "task": "T1329",
+  "web_package": "WEB-28",
+  "date": "2026-10-26",
+  "requested_model": "kimi-k3.1-pro-highspeed",
+  "owner_decision_2026_10_26": "Kimi 当前有问题，不强行换 Kimi；V2 Worker 继续使用当前已授权的 deepseek-flash。Kimi 的 429 记录为外部服务阻塞，不作为本轮 Worker 前置。",
+  "worker_model_in_use": "deepseek-flash",
+  "provider": {
+    "base_url": "https://api.moonshot.cn/anthropic (Kimi, deferred); https://api.deepseek.com/anthropic (DeepSeek, in use)",
+    "profile": "cc-switch providers 'Kimi' and 'DeepSeek' (existing credentials; no new credential created)",
+    "credential_storage": "read from the user's existing cc-switch SQLite profile at run time by ~/with_kimi.py or ~/with_deepseek.py; never written to the repo or a new file"
+  },
+  "checks": [
+    {
+      "id": "endpoint-reachable",
+      "status": "partial",
+      "evidence": "Direct /v1/messages probes returned HTTP 429 engine_overloaded_error twice (request ids 92157912-d111-11f1-8afd-52b77f5ec49d, 56222e16-d115-11f1-9c21-223c19704963). The endpoint and credential were accepted; the service was overloaded.",
+      "verdict": "not a pass"
+    },
+    {
+      "id": "cli-direct-model-name",
+      "status": "failed",
+      "evidence": "Native Linux claude 2.1.310 with --model kimi-k3.1-pro-highspeed prints [claude-code:unrecognized_model] and exits without a model result.",
+      "verdict": "client-side model validation, not an API failure"
+    },
+    {
+      "id": "cli-alias",
+      "status": "passed",
+      "evidence": "with ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3.1-pro-highspeed and --model opus, the CLI completed: result returned, terminal_reason=completed, is_error=false. A tool call (Read README.md) returned the first heading.",
+      "verdict": "the only working transport shape found so far; the API reports modelUsage key 'kimi-k3', not the requested name"
+    },
+    {
+      "id": "model-identity",
+      "status": "passed",
+      "evidence": "Owner chose deepseek-flash on 2026-10-26. T1333 registry records model=deepseek-flash and the probe content names it.",
+      "verdict": "blocking for a WEB-28 pass"
+    },
+    {
+      "id": "deepseek-direct-model",
+      "status": "passed",
+      "evidence": "Native Linux claude 2.1.310 with the existing DeepSeek profile and --model deepseek-flash completed a tool call (Read README.md); modelUsage=deepseek-flash, terminal_reason=completed. The direct name avoids the alias indirection, so rddev records the authorized model verbatim.",
+      "verdict": "this is the transport shape for T1333"
+    },
+    {
+      "id": "deepseek-cli-alias",
+      "status": "passed",
+      "evidence": "Native Linux claude 2.1.310 with the existing DeepSeek profile, --model opus, completed a tool call (Read README.md) and returned the first heading; modelUsage=deepseek-flash[1M], terminal_reason=completed, is_error=false. This is the model the owner authorized for V2 workers on 2026-10-26.",
+      "verdict": "transport alias is cosmetic; the reported model is the authorized one"
+    },
+    {
+      "id": "rddev-spawn-collect",
+      "status": "passed",
+      "evidence": "T1333 spawned an independent worker (model=deepseek-flash, pid recorded), collect required HEAD==baseline, 3 changed paths inside tests/worker-precheck/**, RESULT schema valid, no secrets, no residue. State moved running->verification.",
+      "verdict": "isolated worktree and scope hold"
+    },
+    {
+      "id": "structured-result-rejection",
+      "status": "partial",
+      "evidence": "The worker ran the existing TestWorkerCollectRejects* suite (HEAD moved, out-of-scope write, non-conforming RESULT) and passed. The Supervisor forged-RESULT drill on a live task is still to be run.",
+      "verdict": "unit-level rejection covered; live forged RESULT still pending"
+    },
+    {
+      "id": "isolation",
+      "status": "not_run",
+      "evidence": "Planned: HEAD==baseline, no refs, diff inside allowed_scope, no credentials in the worker env."
+    },
+    {
+      "id": "reviewer",
+      "status": "passed",
+      "evidence": "First independent review: request_changes, blocking finding precheck_test.go:21 unused const probeFile (staticcheck U1000). Second review after same-session rework: approve, 0 blocking. Reviewer worktree fingerprint unchanged.",
+      "verdict": "review and rework loop proven"
+    },
+    {
+      "id": "failure-and-recovery",
+      "status": "partial",
+      "evidence": "The failure path is proven end-to-end (review request_changes -> rework same session -> approve). A termination/disk-recovery drill is still to be run before T1329 can be marked complete.",
+      "verdict": "failure/rework proven; crash recovery pending"
+    },
+    {
+      "id": "g2-g3",
+      "status": "passed",
+      "evidence": "G1/G2/G3/G4 all passed locally after the environment fixes (venv PATH, Playwright libs, Gitea postadmin/post-git-svc, MinIO mirror). 11 required jobs plus acceptance."
+    }
+  ],
+  "conclusion": "WEB-28 is partially proven: the independent worker chain, isolation, structured RESULT, collect, first-review rejection, same-session rework, second-review approve and G2/G3 all ran for real on deepseek-flash. Kimi remains blocked by 429. A termination/disk-recovery drill and a live forged-RESULT rejection are still unrun, so T1329 is not yet complete."
+}

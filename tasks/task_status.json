@@ -12813,10 +12813,75 @@
       "status": "todo"
     },
     "T1332": {
-      "status": "todo"
+      "status": "merged",
+      "completed_at": "2026-10-26T09:51:48Z",
+      "notes": "Issue #381; PR #382. WEB-00 contract inventory and three backend breakpoints."
     },
     "T1333": {
-      "status": "todo"
+      "status": "merged",
+      "started_at": "2026-10-26T09:45:20Z",
+      "worker_run_id": "run-ccbd7fc46b83b776",
+      "accepted_by_supervisor_at": "2026-10-26T11:48:11Z",
+      "merged_at": "2026-10-26T12:02:33Z",
+      "rejection_reason": "First independent review: request_changes. One blocking and two recording issues.\n\n1) BLOCKING — tests/worker-precheck/precheck_test.go:21: the constant `probeFile`\nis declared and never used. `bash scripts/staticcheck.sh` in your worktree\nreproduces `const probeFile is unused (U1000)`; staticcheck is a required CI\ngate and new code is never baselined. Fix: use it in the test (`path := probeFile`)\nor delete the constant. Then run `bash scripts/staticcheck.sh` and\n`go test -count=1 ./tests/worker-precheck/` and record both.\n\n2) RESULT tests entry 6: the recorded command is\n`gofmt -l tests/worker-precheck/ && go vet ./tests/worker-precheck/` but what you\nactually ran also ended with `&& go test -count=1 ./tests/worker-precheck/`, and\nthe evidence says \"both produced no output\" while the real run printed\n`ok github.com/lichman0405/post/tests/worker-precheck 0.004s`. Record the exact\ncommand and its full observed output.\n\n3) AC3: the task spec was clarified on main (3ca0f3a). The Supervisor's\nindependent rerun and the forged/missing-field RESULT drill are the Supervisor's\nsteps, not yours. In RESULT, AC3 may only claim the collect-rejection tests you\nactually ran; do not mark the Supervisor drill as passed.\n\nStay inside tests/worker-precheck/**; do not commit, push or touch tasks/specs/docs.\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-26T09:38:30Z",
+          "run_id": "run-d0ae937aff8c881f"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-26T09:38:33Z",
+          "run_id": "run-5418c891bfa7cd40",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-26T09:40:57Z",
+          "run_id": "run-2cf98e718f3f3daf",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-26T09:45:15Z",
+          "run_id": "run-29a18d3a851d145b",
+          "reason": "First independent review: request_changes. One blocking and two recording issues.\n\n1) BLOCKING — tests/worker-precheck/precheck_test.go:21: the constant `probeFile`\nis declared and never used. `bash scripts/staticcheck.sh` in your worktree\nreproduces `const probeFile is unused (U1000)`; staticcheck is a required CI\ngate and new code is never baselined. Fix: use it in the test (`path := probeFile`)\nor delete the constant. Then run `bash scripts/staticcheck.sh` and\n`go test -count=1 ./tests/worker-precheck/` and record both.\n\n2) RESULT tests entry 6: the recorded command is\n`gofmt -l tests/worker-precheck/ && go vet ./tests/worker-precheck/` but what you\nactually ran also ended with `&& go test -count=1 ./tests/worker-precheck/`, and\nthe evidence says \"both produced no output\" while the real run printed\n`ok github.com/lichman0405/post/tests/worker-precheck 0.004s`. Record the exact\ncommand and its full observed output.\n\n3) AC3: the task spec was clarified on main (3ca0f3a). The Supervisor's\nindependent rerun and the forged/missing-field RESULT drill are the Supervisor's\nsteps, not yours. In RESULT, AC3 may only claim the collect-rejection tests you\nactually ran; do not mark the Supervisor drill as passed.\n\nStay inside tests/worker-precheck/**; do not commit, push or touch tasks/specs/docs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-26T09:45:20Z",
+          "run_id": "run-ccbd7fc46b83b776",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-26T09:46:44Z",
+          "run_id": "run-73bedb8c42521138",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-26T11:48:11Z",
+          "run_id": "run-17815648a4be3553"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-26T12:02:33Z",
+          "run_id": "run-06534c770bf9b635",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ],
+      "completed_at": "2026-10-26T12:02:52Z",
+      "notes": "Issue #385; PR #386. First independent DeepSeek worker; review request_changes -> same-session rework -> approve; G1-G4 green."
     }
   },
   "version": 2
