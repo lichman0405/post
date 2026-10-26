@@ -16,7 +16,11 @@
       "issue": 377,
       "pull_requests": [
         378
-      ]
+      ],
+      "task_issues": {
+        "T1301": 377,
+        "T1332": 381
+      }
     },
     {
       "web": "WEB-01",
