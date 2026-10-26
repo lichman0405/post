@@ -1,6 +1,6 @@
 > **V2 开发交接更新（2026-10-26）**：产品访谈 4/4 已确认，交付目标为可部署、功能完整的团队试用版。31 个工作包已注册为正式 **T1301–T1331**（WEB-00 另有 Supervisor 盘点切片 **T1332**）；`v2_required` 与 WEB→T 映射由 `scripts/validate_v2_scope.py` 及其 fixture 套件执行，并接入 `task-state` 作业（结构模式）。旧账本已按 PR #370/#371/#372/#373/#374/#375 校正为 merged。canonical 工作区已迁到 WSL2 **Ubuntu 24.04 `~/post`**；`rddev doctor` 25/27 required，剩 RAM 31 GiB（宿主物理上限）与 bubblewrap 待补。Kimi 端点与凭据可用，但实测返回 429 overloaded，**WEB-28 尚未通过**。以下历史记录保留原样，不作为 V2 已完成的证明。
 
-> **当前这一刻（2026-10-26）**：V2 DAG 注册完成（T1301–T1332，32 笔，全部 `todo`），尚未派工。第一批为 WEB-00 契约盘点（T1332，Supervisor 面）与 WEB-28 Kimi/Worker 链预检（T1329）；之后按依赖派 WEB-01 真 UI 验收框架（T1302）。产品验收 U01–U14 全部 `not_run`。
+> **当前这一刻（2026-10-26）**：T1301 已随 PR #378 合并（32 笔 V2 任务注册、v2_required 投影进 CI）。安全前置 PR #380 已合并（Next 16.4.3、Go 1.27.3、staticcheck 2026.2.2、gosec 2.30.0）。下一步：T1332 契约盘点 PR；T1333 用 **deepseek-flash** 跑第一个独立 Worker（Kimi 429 外部阻塞，owner 已裁定本轮不强求）。产品验收 U01–U14 仍全部 `not_run`。
 
 > **当前这一刻（2026-09-24 19:05）**：**V1 之后的三笔都在流水线上，本轮我做的全是「验收与订正」——两处后果都已立账，两笔「合并后由我做」的活写在这里。** 驱动的机械段照常跑：T1226 在 `verification`、T1228 在 `verification`（collect 绿、等复核）、**T1223 的返工已交付**（`completed`、exit 0，等 collect）、T1224 在 `accepted`（**PR #370 的 12 项检查全绿**，等驱动腾出手来合并）。驱动此刻正卡在 T1226 的 G2 里（11 个作业的整轮，≈20 分钟），所以 T1224 的合并与 T1223 的 collect 都排在它后面。
 >

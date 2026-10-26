@@ -12718,7 +12718,9 @@
       "completed_at": "2026-09-24T13:10:33Z"
     },
     "T1301": {
-      "status": "todo"
+      "status": "merged",
+      "completed_at": "2026-10-26T09:37:21Z",
+      "notes": "Issue #377; PR #378. 32 V2 tasks registered; v2_required projection + fixtures green; old ledger reconciled to PR #370-#375."
     },
     "T1302": {
       "status": "todo"

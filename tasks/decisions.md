@@ -44,6 +44,18 @@
   都不算 WEB-28 通过。
 - **可逆性**：可逆；仅使用既有账号。
 
+## L3-20261026-5 — V2 Worker 模型（owner 裁定）
+
+- **决策**：本轮 V2 Worker 使用当前已授权的 **deepseek-flash**；不再强求
+  `kimi-k3.1-pro-highspeed`。Kimi 的 429 记为外部服务阻塞，不作为本轮 Worker 前置。
+- **证据**：Kimi 模型列表确认该 SKU 存在；直接 `/v1/messages` 连续返回
+  `429 engine_overloaded_error`，同 key 下 `kimi-k3` 返回 200；Claude CLI 直传
+  Kimi SKU 被判 `unrecognized_model`。DeepSeek 的 `--model deepseek-flash`
+  可完成工具调用，modelUsage=`deepseek-flash`。
+- **后果**：WEB-28 的模型身份按 DeepSeek 记录；Kimi 路径保留为未通过/外部阻塞。
+  若 Kimi 恢复，另行验证，不追溯改写本轮证据，也不把 `kimi-k3` 冒充目标 SKU。
+- **可逆性**：可逆；owner 可随时改回或指定另一模型。
+
 ## L3-20260912-1 — Repository visibility（已由 owner 裁定）
 
 - **决策**：`lichman0405/post` 保持 **PRIVATE**，这是 owner 的有意选择。
