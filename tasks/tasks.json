@@ -12016,7 +12016,7 @@
       "id": "T1333",
       "phase": "P14",
       "phase_name": "V2 可部署团队试用版",
-      "title": "WEB-28 受控样例：Kimi Worker 全链预检（工具/结构化 RESULT/隔离/恢复）",
+      "title": "WEB-28 受控样例：独立 Worker 全链预检（工具/结构化 RESULT/隔离/恢复）",
       "v1_required": false,
       "v2_required": true,
       "web_package": "WEB-28",
@@ -12033,7 +12033,7 @@
       "acceptance_criteria": [
         "go test ./tests/worker-precheck/ 通过，且测试真的断言了被创建的文件内容。",
         "Worker 使用 Read/Edit/Bash 完成工作；collect 接受 RESULT，HEAD 等于 baseline，diff 只在 allowed_scope 内。",
-        "Supervisor 独立重跑测试并通过；伪造或缺字段的 RESULT 会被 collect 拒绝（本轮另做负向验证）。"
+        "Worker 运行现有 collect 拒绝单测并通过，并在 RESULT 中只陈述自己实际执行过的验证；Supervisor 的独立重跑与伪造 RESULT 负向注入由 Supervisor 在验收时另行完成。"
       ],
       "tests": [
         "the worker-precheck Go test fails before the probe file exists and passes after",
