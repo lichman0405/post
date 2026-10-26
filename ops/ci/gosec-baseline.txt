@@ -11,12 +11,12 @@
 # findings a reviewer judged not to be a security issue, and the reason column
 # says which line was judged and why.
 #
-# tool: gosec v2.29.0 over this module's own packages: 783 files, 256 findings
-#       (53 HIGH, 161 MEDIUM, 42 LOW, as the row's severity-mix line reports).
-#       Both numbers are re-derived, on 2026-09-24, from the row's own output:
-#       `bash tests/security/sast.sh go` prints "783 file(s) scanned, 256
+# tool: gosec v2.30.0 over this module's own packages: 784 files, 255 findings
+#       (52 HIGH, 161 MEDIUM, 42 LOW, as the row's severity-mix line reports).
+#       Both numbers are re-derived, on 2026-10-26, from the row's own output:
+#       `bash tests/security/sast.sh go` prints "784 file(s) scanned, 255
 #       finding(s) reported" and the mix above, and the entries in THIS file —
-#       which are the same 256 — by `grep -c '^[^#]' ops/ci/gosec-baseline.txt`.
+#       which are the same 255 — by `grep -c '^[^#]' ops/ci/gosec-baseline.txt`.
 #       They are what this tree printed on that date, not a list this comment
 #       maintains: the file count follows the module, the finding count the
 #       code. (Written 2026-09-23 as 797 files / 254 findings; the file count
@@ -321,5 +321,4 @@ tests/contract/mcp.go:34:14:G304	not-attacker-reachable	raw, err := os.ReadFile(
 tests/contract/mcp.go:244:16:G304	not-attacker-reachable	docText, _ := os.ReadFile(filepath.Join(root, opts.DocPath)) reads a path built from the contract-test harness, whose input is the path on its command line — no HTTP request or other untrusted input reaches the name (see the notes on the individual sites)
 tests/e2e-pr-flows/harness/main.go:759:2:G104	not-a-security-issue	the unchecked error at resp.Body.Close() is a Close/Remove/Sync/io.Copy-to-Discard or a report write whose failure cannot change any security decision here (the path it would affect is the end-to-end PR-flow harness, driven by run.sh against the local stack)
 tests/e2e-pr-flows/harness/main.go:893:9:G204	not-attacker-reachable	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...) runs a binary the tool itself resolved (the literal "git", or a LookPath'ed psql) with an argument slice and no shell, from the end-to-end PR-flow harness, driven by run.sh against the local stack
-tests/e2e-pr-flows/harness/main.go:893:28:G702	not-a-security-issue	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...): the rule's claim is command injection, and there is no shell here — the binary is the constant "git" and the arguments are passed as argv from the end-to-end PR-flow harness, driven by run.sh against the local stack
 tests/e2e-pr-flows/harness/main.go:911:3:G104	not-a-security-issue	the unchecked error at resp.Body.Close() is a Close/Remove/Sync/io.Copy-to-Discard or a report write whose failure cannot change any security decision here (the path it would affect is the end-to-end PR-flow harness, driven by run.sh against the local stack)

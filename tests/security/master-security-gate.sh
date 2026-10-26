@@ -248,7 +248,7 @@ add_check sast-go \
   "docs/23 §11 (SAST)" \
   "go gosec file:tests/security/sast.sh file:ops/ci/gosec-baseline.txt file:ops/security/tool-versions.sh" \
   "bash tests/security/sast.sh go" \
-  '^ok   sast-go: gosec v2\.29\.0: [0-9]+ file\(s\) scanned, [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)' \
+  '^ok   sast-go: gosec v2\.30\.0: [0-9]+ file\(s\) scanned, [0-9]+ finding\(s\) reported \([0-9]+ baselined \(reviewed\), 0 unbaselined\)' \
   '^     severity mix: '
 
 # The go row's SURFACE, registered directly under it because the two read as

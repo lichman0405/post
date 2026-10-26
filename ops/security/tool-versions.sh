@@ -39,7 +39,7 @@
 # for a `go install`ed binary, so the row reads the module version out of the
 # binary with `go version -m` instead — see version_of_go_tool in
 # tests/security/sast.sh.
-GOSEC_VERSION=v2.29.0
+GOSEC_VERSION=v2.30.0
 
 # Python SAST (tests/security/sast.sh python). Installed with `uv tool install`
 # into ~/.local/bin.
