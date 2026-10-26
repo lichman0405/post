@@ -1,0 +1,420 @@
+{
+  "version": "1.0",
+  "date": "2026-10-26",
+  "base_commit": "c03725682e59f0c98fc4e2a09c77e481dda4e38c",
+  "kind": "web_package_to_task_mapping",
+  "note": "WEB→T→Issue→PR 追溯映射。Issue/PR 在派工时由 Supervisor 填写；本文件不是任务状态账本。",
+  "entries": [
+    {
+      "web": "WEB-00",
+      "tasks": [
+        "T1301",
+        "T1332"
+      ],
+      "milestone": "M0",
+      "journeys": [],
+      "issue": 377,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-01",
+      "tasks": [
+        "T1302"
+      ],
+      "milestone": "M0",
+      "journeys": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-02",
+      "tasks": [
+        "T1303"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U01"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-03",
+      "tasks": [
+        "T1304"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U02"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-04",
+      "tasks": [
+        "T1305"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U01",
+        "U02"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-05",
+      "tasks": [
+        "T1306"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U03"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-06",
+      "tasks": [
+        "T1307"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U03"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-07",
+      "tasks": [
+        "T1308"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U03",
+        "U05"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-08",
+      "tasks": [
+        "T1309"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U03"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-09",
+      "tasks": [
+        "T1310"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U04"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-10",
+      "tasks": [
+        "T1311"
+      ],
+      "milestone": "M1",
+      "journeys": [
+        "U03"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-11",
+      "tasks": [
+        "T1312"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U02",
+        "U03"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-12",
+      "tasks": [
+        "T1313"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U05"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-13",
+      "tasks": [
+        "T1314"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U05"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-14",
+      "tasks": [
+        "T1315"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U05"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-15",
+      "tasks": [
+        "T1316"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U06"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-16",
+      "tasks": [
+        "T1317"
+      ],
+      "milestone": "M2",
+      "journeys": [
+        "U06"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-17",
+      "tasks": [
+        "T1318"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U07"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-18",
+      "tasks": [
+        "T1319"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U07"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-19",
+      "tasks": [
+        "T1320"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U08"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-20",
+      "tasks": [
+        "T1321"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U09"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-21",
+      "tasks": [
+        "T1322"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U09",
+        "U10"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-22",
+      "tasks": [
+        "T1323"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U10"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-23",
+      "tasks": [
+        "T1324"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U11"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-24",
+      "tasks": [
+        "T1325"
+      ],
+      "milestone": "M4",
+      "journeys": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-25",
+      "tasks": [
+        "T1326"
+      ],
+      "milestone": "M4",
+      "journeys": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-26",
+      "tasks": [
+        "T1327"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U12"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-27",
+      "tasks": [
+        "T1328"
+      ],
+      "milestone": "M3",
+      "journeys": [
+        "U13"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-28",
+      "tasks": [
+        "T1329"
+      ],
+      "milestone": "M0",
+      "journeys": [],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-29",
+      "tasks": [
+        "T1330"
+      ],
+      "milestone": "M4",
+      "journeys": [
+        "U14"
+      ],
+      "issue": null,
+      "pull_requests": []
+    },
+    {
+      "web": "WEB-30",
+      "tasks": [
+        "T1331"
+      ],
+      "milestone": "M4",
+      "journeys": [
+        "U14"
+      ],
+      "issue": null,
+      "pull_requests": []
+    }
+  ]
+}

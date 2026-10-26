@@ -1,5 +1,7 @@
 # 49 — Claude Code 无人值守交接
 
+当前 V2 的直接启动入口为根 [V2_CLAUDE_CODE_PROMPT.md](../V2_CLAUDE_CODE_PROMPT.md)，具体执行协议为 [docs/72](72_V2_CLAUDE_CODE_HANDOFF.md)。产品范围与所有已确认决定先按 docs/70/71 读取，再恢复正式任务状态。
+
 ## 目标
 
 尽量减少日常人工参与，但不允许 Agent 自主改变产品意图。
@@ -7,6 +9,8 @@
 ## 开发组织
 
 一个长期 Supervisor Claude Code + 多个由 `rddev` 拉起的独立 Claude Code Worker。Worker 不是 subagent；任务完成即回收。默认并行 3，最大 4。
+
+2026-10-26 Owner 更新：取消 `rddev drive` 的强制使用条件。Supervisor 可直接编排 `rddev` 子命令完成任务与 GitHub 流程，`drive` 仅为可选机械执行器。任务隔离、四层 Gate、Git 权限与可恢复记录保持有效，见 ADR-029。
 
 ## Supervisor 自主权
 

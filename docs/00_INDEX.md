@@ -92,3 +92,15 @@
 `specs/orchestrator/` 为 `rddev`/Worker 机器可读协议。
 
 - `69_GITHUB_SOURCE_REPOSITORY.md`：POST 源码 GitHub repository、Supervisor control plane 与 Worker credential boundary。
+
+## F. V2 团队试用版：开发交接入口
+
+- [70_WEB_OPERABILITY_V2_PLAN.md](70_WEB_OPERABILITY_V2_PLAN.md)：完整产品范围、31 个工作包、优先级、依赖、里程碑与 U01–U14 网页验收。
+- [71_V2_PRODUCT_DISCOVERY.md](71_V2_PRODUCT_DISCOVERY.md)：Owner 已确认决定，产品访谈 4/4 已结束。
+- [72_V2_CLAUDE_CODE_HANDOFF.md](72_V2_CLAUDE_CODE_HANDOFF.md)：Claude Code/Kimi 预检、持续监督、独立 Worker、GitHub 流程与恢复。
+- [73_V2_ESTIMATE_AND_EXECUTION.md](73_V2_ESTIMATE_AND_EXECUTION.md)：单 Agent 与 Supervisor/Worker 比较、工期假设及风险。
+- [V2_CLAUDE_CODE_PROMPT.md](../V2_CLAUDE_CODE_PROMPT.md)：可直接交给 Claude Code 的启动提示。
+- [tasks/v2/README.md](../tasks/v2/README.md)：机器清单、网页验收清单与文档校验命令。
+- [ADR-029](adr/ADR-029-optional-drive-with-persistent-supervision.md)：取消 drive 强绑定，保留持续监督和验收边界。
+
+V2 产品与交付方向已经确认；Supervisor 在开工时将工作包正式注册并同步契约。执行真相源仍是正式 DAG／状态／测试账本，历史 V1 验收不改写、不冒充 V2 通过。

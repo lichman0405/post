@@ -2020,6 +2020,966 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1301-TEST-01",
+      "task_id": "T1301",
+      "name": "v2 projection validator: all 31 packages mapped, v1_required untouched",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1301-TEST-02",
+      "task_id": "T1301",
+      "name": "v2 projection fixture: an unmapped package and a v2 task marked v1_required both fail",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1301-TEST-03",
+      "task_id": "T1301",
+      "name": "task DAG, status and tests ledgers cover all 32 registered V2 tasks",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1302-TEST-01",
+      "task_id": "T1302",
+      "name": "browser journey logs in through the DOM and persists the session",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1302-TEST-02",
+      "task_id": "T1302",
+      "name": "removing a primary button handler turns the corresponding journey red",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1302-TEST-03",
+      "task_id": "T1302",
+      "name": "missing service/account entry point fails the run instead of skipping",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1303-TEST-01",
+      "task_id": "T1303",
+      "name": "U01 signup, wrong-password error and session persistence are all exercised through the web UI",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1303-TEST-02",
+      "task_id": "T1303",
+      "name": "home exposes a create/continue-project entry after login",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1303-TEST-03",
+      "task_id": "T1303",
+      "name": "expired session offers a recoverable path",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1304-TEST-01",
+      "task_id": "T1304",
+      "name": "U02 creates an organization and invites B through the web UI",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1304-TEST-02",
+      "task_id": "T1304",
+      "name": "Viewer cannot promote itself and the refusal is visible",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1304-TEST-03",
+      "task_id": "T1304",
+      "name": "role change survives reload and keeps history",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1305-TEST-01",
+      "task_id": "T1305",
+      "name": "U01 creates one Public and one explicitly Private project from the web form",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1305-TEST-02",
+      "task_id": "T1305",
+      "name": "duplicate slug shows a field error and creates no second project",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1305-TEST-03",
+      "task_id": "T1305",
+      "name": "anonymous cannot see private project content or its existence",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1306-TEST-01",
+      "task_id": "T1306",
+      "name": "U03 reaches a Question, an Experiment and a Finding version by clicking, without pasting an API URL",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1306-TEST-02",
+      "task_id": "T1306",
+      "name": "old version and return path keep the selected object",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1306-TEST-03",
+      "task_id": "T1306",
+      "name": "research map and list agree on the object set",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1307-TEST-01",
+      "task_id": "T1307",
+      "name": "U03 saves a minimal draft, leaves, reloads and continues it",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1307-TEST-02",
+      "task_id": "T1307",
+      "name": "the main story edits Question->Experiment/Calculation->Dataset->Claim/Finding",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1307-TEST-03",
+      "task_id": "T1307",
+      "name": "each of the 12 V1 object types has its own form acceptance",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1308-TEST-01",
+      "task_id": "T1308",
+      "name": "a web-created research change becomes a provider ref that PR merge can consume without CLI git",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1308-TEST-02",
+      "task_id": "T1308",
+      "name": "stopping the Git service yields a visible incomplete/retryable state, never a false success",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1308-TEST-03",
+      "task_id": "T1308",
+      "name": "reconciliation refuses to report success when the provider write is missing",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1309-TEST-01",
+      "task_id": "T1309",
+      "name": "U03 creates a plan, records an execution, adds an observation, links an external run and hands off",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1309-TEST-02",
+      "task_id": "T1309",
+      "name": "a failed result can be recorded without being rewritten as success",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1309-TEST-03",
+      "task_id": "T1309",
+      "name": "every record points at a research version and needs no model-generated content",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1310-TEST-01",
+      "task_id": "T1310",
+      "name": "U04 uploads from an Experiment context and an anonymous visitor downloads the default-Open attachment",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1310-TEST-02",
+      "task_id": "T1310",
+      "name": "Restricted and private attachments are refused to unauthorized sessions while the owner can retrieve them",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1310-TEST-03",
+      "task_id": "T1310",
+      "name": "interrupted upload retries, new version keeps old references, and the Files page stays read-only",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1311-TEST-01",
+      "task_id": "T1311",
+      "name": "U03 builds supporting and opposing assertions with a pinned source version and scope",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1311-TEST-02",
+      "task_id": "T1311",
+      "name": "a plain citation never renders as verified evidence",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1311-TEST-03",
+      "task_id": "T1311",
+      "name": "provenance is visually separate from the evidence graph",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1312-TEST-01",
+      "task_id": "T1312",
+      "name": "U02 creates an issue, assigns B, B replies and changes state, and the second project stays isolated",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1312-TEST-02",
+      "task_id": "T1312",
+      "name": "closing an issue does not solve the linked research question",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1312-TEST-03",
+      "task_id": "T1312",
+      "name": "promotion to a research proposal requires an explicit user confirmation",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1313-TEST-01",
+      "task_id": "T1313",
+      "name": "U05 creates a PR from a branch, requests review and receives changes requested",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1313-TEST-02",
+      "task_id": "T1313",
+      "name": "the resubmitted revision shows base/source/target and the new diff",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1313-TEST-03",
+      "task_id": "T1313",
+      "name": "stale reviews are invalidated by rule",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1314-TEST-01",
+      "task_id": "T1314",
+      "name": "U05 runs Scientific and Integrity review separately and records a human conflict resolution",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1314-TEST-02",
+      "task_id": "T1314",
+      "name": "a personal self-review is labelled as self-review, not independent verification",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1314-TEST-03",
+      "task_id": "T1314",
+      "name": "team independent-review policy cannot be satisfied by the author's own approval",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1315-TEST-01",
+      "task_id": "T1315",
+      "name": "U05 merges from the web only when checks and review policy are satisfied",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1315-TEST-02",
+      "task_id": "T1315",
+      "name": "a team PR missing independent review shows a visible refusal",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1315-TEST-03",
+      "task_id": "T1315",
+      "name": "Abort/Reopen preserves history and does not delete the old version",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1316-TEST-01",
+      "task_id": "T1316",
+      "name": "U06 builds a Release from a merged state and later research does not mutate it",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1316-TEST-02",
+      "task_id": "T1316",
+      "name": "the exported research package matches version, Git SHA, blob hashes and policy pins",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1316-TEST-03",
+      "task_id": "T1316",
+      "name": "milestones are dated facts and never become scientific conclusions",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1317-TEST-01",
+      "task_id": "T1317",
+      "name": "U06 publishes the first Asset from an accepted state with no pre-existing Asset",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1317-TEST-02",
+      "task_id": "T1317",
+      "name": "all four Asset types pass their own required-field acceptance",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1317-TEST-03",
+      "task_id": "T1317",
+      "name": "cancelling the confirmation publishes nothing",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1318-TEST-01",
+      "task_id": "T1318",
+      "name": "U07 publishes one Finding/Claim version and an anonymous visitor reads it from a public entry",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1318-TEST-02",
+      "task_id": "T1318",
+      "name": "private branch history and unpublished evidence do not leak",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1318-TEST-03",
+      "task_id": "T1318",
+      "name": "the published version is fixed after later edits",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1319-TEST-01",
+      "task_id": "T1319",
+      "name": "U07 finds the published result, its author and organization from Explore without typing an id",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1319-TEST-02",
+      "task_id": "T1319",
+      "name": "restricted identities are not listed publicly",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1319-TEST-03",
+      "task_id": "T1319",
+      "name": "People is no longer a ComingSoon dead end for public entities",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1320-TEST-01",
+      "task_id": "T1320",
+      "name": "U08 searches a result published in this round and sees its fixed version",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1320-TEST-02",
+      "task_id": "T1320",
+      "name": "cancel creates no project; confirm creates exactly one project and initial research state",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1320-TEST-03",
+      "task_id": "T1320",
+      "name": "no source yields an explicit limitation instead of fabricated content",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1321-TEST-01",
+      "task_id": "T1321",
+      "name": "U09 distinguishes Reference, Dependency, Fork and Derive on the page",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1321-TEST-02",
+      "task_id": "T1321",
+      "name": "a reference still points at the original fixed version",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1321-TEST-03",
+      "task_id": "T1321",
+      "name": "lineage and rights survive the reuse action",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1322-TEST-01",
+      "task_id": "T1322",
+      "name": "U09/U10 lets a non-member contribute external evidence through the web and A reviews it",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1322-TEST-02",
+      "task_id": "T1322",
+      "name": "origin/reviewed/unreviewed states are visible to both sides",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1322-TEST-03",
+      "task_id": "T1322",
+      "name": "an external contributor cannot write A's main",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1323-TEST-01",
+      "task_id": "T1323",
+      "name": "U10 watches from the page, receives a real upstream event, and navigates to the object/version",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1323-TEST-02",
+      "task_id": "T1323",
+      "name": "dependency impact is alerted but never auto-upgraded or auto-rewritten",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1323-TEST-03",
+      "task_id": "T1323",
+      "name": "unsubscribe stops later notifications",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1324-TEST-01",
+      "task_id": "T1324",
+      "name": "U11 changes policy/review requirements with the right role and refuses a lower role",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1324-TEST-02",
+      "task_id": "T1324",
+      "name": "a new policy affects later proposals while historical Release pins stay unchanged",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1324-TEST-03",
+      "task_id": "T1324",
+      "name": "visibility expansion is not silently offered outside the approved flow",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1325-TEST-01",
+      "task_id": "T1325",
+      "name": "every U01-U13 step has a visible next step, retry/cancel path, and no unexplained disabled control",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1325-TEST-02",
+      "task_id": "T1325",
+      "name": "loading/empty/error/permission states keep entered content",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1325-TEST-03",
+      "task_id": "T1325",
+      "name": "keyboard and Chinese/English primary actions remain usable",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1326-TEST-01",
+      "task_id": "T1326",
+      "name": "U01-U14 run from a fresh namespace in one pass and can be re-run",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1326-TEST-02",
+      "task_id": "T1326",
+      "name": "every step carries this run's trace/screenshot/build SHA",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1326-TEST-03",
+      "task_id": "T1326",
+      "name": "any skipped/API-substituted/CLI-assisted step fails the gate",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1327-TEST-01",
+      "task_id": "T1327",
+      "name": "U12 adds a project field, uses it in a record and sees it in the PR",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1327-TEST-02",
+      "task_id": "T1327",
+      "name": "another project is unaffected, and an unauthorized user cannot change the template",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1327-TEST-03",
+      "task_id": "T1327",
+      "name": "updating a template never rewrites historical records or Release meaning",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1328-TEST-01",
+      "task_id": "T1328",
+      "name": "U13 previews text/Markdown/PDF/image/CSV and downloads the original",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1328-TEST-02",
+      "task_id": "T1328",
+      "name": "user-selected columns/ranges produce a chart, statistics and linear/quadratic fit with correct reference values",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1328-TEST-03",
+      "task_id": "T1328",
+      "name": "saved results keep source version, parameters and operator; bad input fails explicitly",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1329-TEST-01",
+      "task_id": "T1329",
+      "name": "a controlled Kimi worker spawn->collect->independent review->G2/G3/G4 completes the full chain",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1329-TEST-02",
+      "task_id": "T1329",
+      "name": "a fabricated/incomplete RESULT is rejected by collect",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1329-TEST-03",
+      "task_id": "T1329",
+      "name": "a controlled failure is reworked and recovered; the session resumes from disk state",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1330-TEST-01",
+      "task_id": "T1330",
+      "name": "U14 installs a fixed version on a clean Ubuntu 24.04/WSL2 Linux filesystem and the web shows the build version",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1330-TEST-02",
+      "task_id": "T1330",
+      "name": "start/stop/upgrade/rollback steps work from the runbook",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1330-TEST-03",
+      "task_id": "T1330",
+      "name": "no undocumented manual database step is needed",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1331-TEST-01",
+      "task_id": "T1331",
+      "name": "U14 backs up PostgreSQL/Gitea/Blob/config and restores into an empty environment",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1331-TEST-02",
+      "task_id": "T1331",
+      "name": "restored project/attachment/Release/Asset/analysis hashes match and permissions do not widen",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1331-TEST-03",
+      "task_id": "T1331",
+      "name": "rollback of the app does not rewrite database history",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1332-TEST-01",
+      "task_id": "T1332",
+      "name": "contract inventory names every G01-G27 row with a source path, an action entry, and a verdict (missing/partial/source-present/uncertain)",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1332-TEST-02",
+      "task_id": "T1332",
+      "name": "G07, first Asset publish and attachment download each have a named backend breakpoint decision and an owning later task",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1332-TEST-03",
+      "task_id": "T1332",
+      "name": "no inventory row claims a UI step passed on the strength of an API/CLI/seed shortcut",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

@@ -57,6 +57,13 @@ jobs:
           python-version: '3.12'
       - name: DAG/state/test coverage + task_status/tests JSON shape
         run: python3 scripts/validate_task_state.py
+      # V2 lives in its own projection: v2_required tasks must never re-enter
+      # the historical V1 denominator, and the WEB->T mapping must stay 1:1.
+      # The script's --complete mode is the final V2 gate, not a per-PR job.
+      - name: V2 required-scope projection (structure, not completion)
+        run: python3 scripts/validate_v2_scope.py
+      - name: V2 projection fixture unit tests
+        run: bash scripts/tests/v2-scope-unit-test.sh
       - name: Task-state validator fixture unit tests
         run: bash scripts/tests/task-state-unit-test.sh
       - name: Progress-view helper fixture tests

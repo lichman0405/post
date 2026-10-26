@@ -98,6 +98,12 @@
           "run": "python3 scripts/validate_task_state.py"
         },
         {
+          "run": "python3 scripts/validate_v2_scope.py"
+        },
+        {
+          "run": "bash scripts/tests/v2-scope-unit-test.sh"
+        },
+        {
           "run": "bash scripts/tests/task-state-unit-test.sh"
         },
         {
@@ -1268,6 +1274,167 @@
       "g3_jobs": [
         "a11y",
         "i18n"
+      ]
+    },
+    "T1301": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1302": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1303": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1304": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1305": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1306": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1307": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1308": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1309": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1310": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1311": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1312": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1313": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1314": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1315": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1316": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1317": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1318": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1319": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1320": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1321": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1322": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1323": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1324": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1325": {
+      "g3_jobs": [
+        "a11y",
+        "i18n"
+      ]
+    },
+    "T1326": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1327": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1328": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1329": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1330": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1331": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1332": {
+      "g3_jobs": [
+        "acceptance"
       ]
     }
   }

@@ -10,11 +10,18 @@ import (
 // TaskSpec is one task of the DAG in tasks/tasks.json. Only the fields rddev
 // consumes are modeled; the file is never rewritten by rddev.
 type TaskSpec struct {
-	ID                 string   `json:"id"`
-	Phase              string   `json:"phase"`
-	PhaseName          string   `json:"phase_name"`
-	Title              string   `json:"title"`
-	V1Required         bool     `json:"v1_required"`
+	ID         string `json:"id"`
+	Phase      string `json:"phase"`
+	PhaseName  string `json:"phase_name"`
+	Title      string `json:"title"`
+	V1Required bool   `json:"v1_required"`
+	// V2Required is the V2 delivery projection. It is deliberately separate
+	// from V1Required so registering V2 work never reopens the historical V1
+	// denominator. scripts/validate_v2_scope.py is the executor that refuses
+	// to call V2 complete on this field alone.
+	V2Required bool `json:"v2_required"`
+	// WebPackage is the WEB-00..WEB-30 handoff package a V2 task belongs to.
+	WebPackage         string   `json:"web_package"`
 	Dependencies       []string `json:"dependencies"`
 	Requirements       []string `json:"requirements"`
 	Deliverables       []string `json:"deliverables"`

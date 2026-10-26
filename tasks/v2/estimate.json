@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "kind": "planning_estimate_not_benchmark",
+  "model_requested": "kimi-k3.1-pro-highspeed",
+  "work_packages": 31,
+  "serial_agent_effort_hours": [
+    388,
+    812
+  ],
+  "effective_parallelism_assumption": [
+    1.5,
+    2.0
+  ],
+  "continuous_runtime_hours_per_day": 24,
+  "extra_integration_ci_recovery_wall_hours": [
+    48,
+    96
+  ],
+  "rework_buffer_fraction": [
+    0.25,
+    0.5
+  ],
+  "rough_envelope_days": [
+    12.6,
+    39.8
+  ],
+  "recommended_calendar_weeks": [
+    3,
+    5
+  ],
+  "optimistic_weeks": [
+    2,
+    3
+  ],
+  "conservative_weeks": [
+    6,
+    8
+  ],
+  "excluded_waits": [
+    "新凭据/额度/权限授权等待",
+    "新 L3/重大架构决策等待",
+    "真实团队实际试用和人工反馈周期"
+  ],
+  "calibration": "WEB-28 与首 3–5 个真实切片后按观测周期、返工率、CI 和串行瓶颈更新；不以模型 token 速度推算完工保证。"
+}

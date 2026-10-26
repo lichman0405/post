@@ -1,3 +1,5 @@
+> **当前开发：POST V2 团队试用版。** 从 [V2 Claude Code 启动提示](V2_CLAUDE_CODE_PROMPT.md) 开始，按 [完整开发计划](docs/70_WEB_OPERABILITY_V2_PLAN.md) 与 [执行交接协议](docs/72_V2_CLAUDE_CODE_HANDOFF.md) 推进。产品访谈已完成，`rddev drive` 可选；保留独立 Worker、完整 GitHub 流程和真实网页验收。下文保留 V1 规格包的历史说明。
+
 # POST V1 — Claude Code Autonomous Development Specification v0.3
 
 **POST — Platform for Open Science & Technology** 是一个以版本化科研状态、Research Asset 与可验证贡献为基础的 Open R&D Network。

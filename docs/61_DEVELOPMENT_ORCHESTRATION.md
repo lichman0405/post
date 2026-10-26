@@ -29,6 +29,8 @@
 
 `rddev` 是确定性执行器，不做产品判断。
 
+2026-10-26 执行方式更新（Owner 明确授权，ADR-029）：`rddev drive` 不再是强制入口。默认可由长期 Supervisor 直接调用下面的任务／Worker／Gate／Git／PR 子命令；也可选择 `drive` 推进机械步骤。两种方式都需要持续的 Supervisor 判断与恢复，不得跳过 G1–G4、Worker 隔离或 GitHub 交付链路。更换为单 Agent 同时编码和控制 Git 不属于本次授权。
+
 推荐命令：
 
 ```bash
