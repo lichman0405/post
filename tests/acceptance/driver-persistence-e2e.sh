@@ -80,12 +80,18 @@ go build -o "$WORK/rddev" ./cmd/rddev || { fail "building rddev"; printf '\n%d f
 ok "rddev built"
 
 # Launch from a subshell that EXITS immediately. This is the property under
-# test: the driver must not be a child of the launcher's lifetime.
-( setsid "$WORK/rddev" drive --parallel 1 --poll 1s \
+# test: the driver must not be a child of the launcher's lifetime. The
+# launcher records its own PID so the assertion below can name the one parent
+# the driver must NOT keep: PPID==1 is what a clean runner shows, but a
+# process tree with PR_SET_CHILD_SUBREAPER (the local G2 harness is one)
+# adopts the orphan instead, and that is still not the launcher.
+( echo "$BASHPID" > "$WORK/launcher.pid"
+  setsid "$WORK/rddev" drive --parallel 1 --poll 1s \
     --repo-root "$REPO" --tasks-json "$REPO/tasks/tasks.json" --state-json "$REPO/tasks/task_status.json" \
     >"$WORK/driver.log" 2>&1 & echo $! > "$WORK/driver.pid" )
 sleep 3
 DRIVER_PID="$(cat "$WORK/driver.pid" 2>/dev/null || true)"
+LAUNCHER_PID="$(cat "$WORK/launcher.pid" 2>/dev/null || true)"
 
 if [[ -z "$DRIVER_PID" ]] || ! kill -0 "$DRIVER_PID" 2>/dev/null; then
   fail "the driver did not survive its launcher: $(tail -3 "$WORK/driver.log")"
@@ -93,10 +99,13 @@ if [[ -z "$DRIVER_PID" ]] || ! kill -0 "$DRIVER_PID" 2>/dev/null; then
 fi
 ok "the driver outlived the subshell that started it (pid $DRIVER_PID)"
 
-if [[ "$(ps -o ppid= -p "$DRIVER_PID" | tr -d ' ')" == "1" ]]; then
+PARENT_PID="$(ps -o ppid= -p "$DRIVER_PID" | tr -d ' ')"
+if [[ "$PARENT_PID" == "1" ]]; then
   ok "it is reparented to init, not owned by the launcher"
+elif [[ -n "$LAUNCHER_PID" && -n "$PARENT_PID" && "$PARENT_PID" != "$LAUNCHER_PID" ]]; then
+  ok "it is reparented away from the launcher (parent $PARENT_PID — a subreaper in this environment)"
 else
-  fail "the driver's parent is still $(ps -o ppid= -p "$DRIVER_PID" | tr -d ' ') — it is tied to something else's lifetime"
+  fail "the driver's parent is still $PARENT_PID (launcher $LAUNCHER_PID) — it is tied to the launcher's lifetime"
 fi
 
 # Heartbeat advances: liveness is a fact on disk, not an inference.
