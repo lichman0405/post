@@ -12882,6 +12882,9 @@
       ],
       "completed_at": "2026-10-26T12:02:52Z",
       "notes": "Issue #385; PR #386. First independent DeepSeek worker; review request_changes -> same-session rework -> approve; G1-G4 green."
+    },
+    "T1334": {
+      "status": "todo"
     }
   },
   "version": 2

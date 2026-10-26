@@ -3000,6 +3000,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1334-TEST-01",
+      "task_id": "T1334",
+      "name": "the worker-recovery probe passes after respawn",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1334-TEST-02",
+      "task_id": "T1334",
+      "name": "stop leaves no live process and respawn starts a new attempt from disk state",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

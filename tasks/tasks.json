@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 205,
+  "task_count": 206,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -12063,6 +12063,58 @@
         "docs/72_V2_CLAUDE_CODE_HANDOFF.md"
       ],
       "supervisor_scope_narrowing": "这是 WEB-28 的受控样例，不是产品功能。Worker 只可写 tests/worker-precheck/**；不得读取凭据或调用模型 API，模型由 rddev 的 --model 与 Supervisor 提供的 env 决定。验收时 Supervisor 会独立检查 RESULT、HEAD、scope 与测试，并另做一次失败/恢复演练；本笔通过不等于 WEB-28 全部通过。"
+    },
+    {
+      "id": "T1334",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-28 恢复演练：停止 Worker 后从磁盘重新派工",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-28",
+      "dependencies": [],
+      "requirements": [
+        "建立一个最小 Go 测试包 tests/worker-recovery/，由独立 Worker 完成。",
+        "Supervisor 在 Worker 运行中执行 rddev worker stop；确认无残留进程、状态记录停止原因。",
+        "随后 rddev worker respawn 从磁盘状态重新派工，新 Worker 完成同一任务并通过 collect。"
+      ],
+      "deliverables": [
+        "tests/worker-recovery/ 下的最小 Go 测试包",
+        "stop/respawn 的 registry、exit.status 与 collect 证据"
+      ],
+      "acceptance_criteria": [
+        "go test ./tests/worker-recovery/ 在 respawn 后通过。",
+        "stop 后没有该 Worker 的活进程；respawn 产生新的 attempt，最终 collect 通过且 HEAD==baseline。",
+        "本笔不证明产品功能；U01–U14 仍 not_run。"
+      ],
+      "tests": [
+        "the worker-recovery probe passes after respawn",
+        "stop leaves no live process and respawn starts a new attempt from disk state"
+      ],
+      "allowed_scope": [
+        "tests/worker-recovery/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "cmd/**",
+        "internal/**",
+        "services/**",
+        "infra/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+        "docs/63_WORKER_CONTRACT.md",
+        "docs/72_V2_CLAUDE_CODE_HANDOFF.md"
+      ],
+      "supervisor_scope_narrowing": "恢复演练由 Supervisor 控制 stop/respawn 的时机；Worker 只写 tests/worker-recovery/**。停 Worker 不是任务失败，而是 WEB-28 要求的受控演练；respawn 后必须重新 collect，不得沿用上一 attempt 的 RESULT。"
     }
   ]
 }
