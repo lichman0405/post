@@ -1,0 +1,4 @@
+WEB-28 worker precheck
+task=T1333
+model=deepseek-flash
+scope=tests/worker-precheck
