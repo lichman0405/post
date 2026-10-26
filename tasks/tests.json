@@ -2980,6 +2980,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1333-TEST-01",
+      "task_id": "T1333",
+      "name": "the worker-precheck Go test fails before the probe file exists and passes after",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1333-TEST-02",
+      "task_id": "T1333",
+      "name": "collect accepts the result only when HEAD == baseline and the diff is inside tests/worker-precheck/**",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

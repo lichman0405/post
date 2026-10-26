@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 204,
+  "task_count": 205,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -12011,6 +12011,58 @@
         "docs/04_USERS_ROLES.md"
       ],
       "supervisor_scope_narrowing": "该切片只有 Supervisor 可写（tasks/** 与 docs/** 均为 Supervisor-only）：Worker 不得被派到本任务。产出为 tasks/v2/contract-inventory.json 与 docs/74 的证据矩阵；每条都要给出真实源路径或标为未找到，不能把历史绿灯当成本轮证据。"
+    },
+    {
+      "id": "T1333",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-28 受控样例：Kimi Worker 全链预检（工具/结构化 RESULT/隔离/恢复）",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-28",
+      "dependencies": [],
+      "requirements": [
+        "建立一个最小、确定性的 Go 测试包 tests/worker-precheck/，证明 Worker 能读文件、改文件、执行命令并让测试通过。",
+        "Worker 必须从 rddev 派工、在独立 worktree 内工作、产生合格 RESULT.json；不得提交、推送或改 tasks/specs/docs。",
+        "本笔是 WEB-28（T1329）的第一个受控切片；T1329 仍须另外覆盖 Reviewer、失败返工与磁盘恢复后才能标记完成。"
+      ],
+      "deliverables": [
+        "tests/worker-precheck/ 下的最小 Go 测试包与说明",
+        "RESULT.json：status=completed、tests 全部 passed、acceptance 逐条有 evidence"
+      ],
+      "acceptance_criteria": [
+        "go test ./tests/worker-precheck/ 通过，且测试真的断言了被创建的文件内容。",
+        "Worker 使用 Read/Edit/Bash 完成工作；collect 接受 RESULT，HEAD 等于 baseline，diff 只在 allowed_scope 内。",
+        "Supervisor 独立重跑测试并通过；伪造或缺字段的 RESULT 会被 collect 拒绝（本轮另做负向验证）。"
+      ],
+      "tests": [
+        "the worker-precheck Go test fails before the probe file exists and passes after",
+        "collect accepts the result only when HEAD == baseline and the diff is inside tests/worker-precheck/**"
+      ],
+      "allowed_scope": [
+        "tests/worker-precheck/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "apps/**",
+        "cmd/**",
+        "internal/**",
+        "services/**",
+        "infra/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+        "docs/63_WORKER_CONTRACT.md",
+        "docs/72_V2_CLAUDE_CODE_HANDOFF.md"
+      ],
+      "supervisor_scope_narrowing": "这是 WEB-28 的受控样例，不是产品功能。Worker 只可写 tests/worker-precheck/**；不得读取凭据或调用模型 API，模型由 rddev 的 --model 与 Supervisor 提供的 env 决定。验收时 Supervisor 会独立检查 RESULT、HEAD、scope 与测试，并另做一次失败/恢复演练；本笔通过不等于 WEB-28 全部通过。"
     }
   ]
 }

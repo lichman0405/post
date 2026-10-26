@@ -387,7 +387,8 @@
     {
       "web": "WEB-28",
       "tasks": [
-        "T1329"
+        "T1329",
+        "T1333"
       ],
       "milestone": "M0",
       "journeys": [],
