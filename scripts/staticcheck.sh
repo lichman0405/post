@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 BASELINE=ops/ci/staticcheck-baseline.txt
-VER="${STATICCHECK_VER:-2026.2.1}"
+VER="${STATICCHECK_VER:-2026.2.2}"
 
 if [[ ! -f "$BASELINE" ]]; then
   echo "staticcheck: baseline file $BASELINE missing" >&2

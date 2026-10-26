@@ -20,14 +20,14 @@
   "dependencies": [
     {
       "name": "gosec",
-      "version": "v2.29.0",
+      "version": "v2.30.0",
       "module": "github.com/securego/gosec/v2",
       "kind": "scanner (Go SAST)",
       "license": "Apache-2.0",
-      "license_witness": "$GOMODCACHE/github.com/securego/gosec/v2@v2.29.0/LICENSE.txt, first line \"Apache License\"",
+      "license_witness": "$GOMODCACHE/github.com/securego/gosec/v2@v2.30.0/LICENSE.txt, first line \"Apache License\"",
       "used_by": "tests/security/sast.sh go (gate row sast-go)",
       "purpose": "docs/23 §11 asks for SAST at every Release. gosec is the Go static analyser: it builds the package set and reports G-rules (hardcoded credentials, weak crypto, unsafe pointer/reflect use, unhandled errors on security-relevant calls, file permissions) as a JSON report this repository parses into a per-finding baseline.",
-      "why_this_one": "It is the Go ecosystem's standard SAST tool and the only one that both understands a multi-module Go repository and emits machine-readable output with a stable rule id per finding — the property the per-finding baseline depends on. v2.29.0 specifically: earlier 2.x releases fail to build against Go 1.27 (the toolchain CLAUDE.md §7 pins).",
+      "why_this_one": "It is the Go ecosystem's standard SAST tool and the only one that both understands a multi-module Go repository and emits machine-readable output with a stable rule id per finding — the property the per-finding baseline depends on. v2.30.0 specifically: the 2.29 scanner cannot decode Go 1.27.3 export data (464 files went untype-checked), while earlier 2.x releases fail to build against Go 1.27 (the toolchain CLAUDE.md §7 pins).",
       "alternatives": "semgrep (single tool for three languages, larger rule set, a Python/OCaml toolchain to install, and its ruleset is a moving target unless pinned by commit); CodeQL (strongest analysis, but it needs a database build in a GitHub runner whose licensing differs for private repositories); staticcheck (already in this tree — correctness, not security rules, so it is not a substitute).",
       "license_check": "Apache-2.0 is on the allowlist in ops/security/license-allowlist.json. No copyleft, no use restriction, no ADR required; it is not a distributed dependency of the product at all."
     },
