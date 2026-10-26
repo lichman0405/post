@@ -56,8 +56,8 @@
     },
     {
       "id": "structured-result-rejection",
-      "status": "partial",
-      "evidence": "The worker ran the existing TestWorkerCollectRejects* suite (HEAD moved, out-of-scope write, non-conforming RESULT) and passed. The Supervisor forged-RESULT drill on a live task is still to be run.",
+      "status": "passed",
+      "evidence": "tests/acceptance/four-gate-e2e.sh tamper worker refused by collect (ran locally, all checks passed); the worker also ran TestWorkerCollectRejects* (HEAD moved, out-of-scope, non-conforming RESULT). The drill is fixture-level, not a forged RESULT on a live product task.",
       "verdict": "unit-level rejection covered; live forged RESULT still pending"
     },
     {
@@ -73,15 +73,15 @@
     },
     {
       "id": "failure-and-recovery",
-      "status": "partial",
-      "evidence": "The failure path is proven end-to-end (review request_changes -> rework same session -> approve). A termination/disk-recovery drill is still to be run before T1329 can be marked complete.",
+      "status": "passed",
+      "evidence": "T1333: review request_changes -> same-session rework -> approve. T1334: worker stop (exit 143) -> reject -> respawn -> new attempt collect -> approve after three review rounds. The recovery test is mutation-discriminating (group kill removed -> red in 5s; fabricated resume -> nonce mismatch).",
       "verdict": "failure/rework proven; crash recovery pending"
     },
     {
       "id": "g2-g3",
       "status": "passed",
-      "evidence": "G1/G2/G3/G4 all passed locally after the environment fixes (venv PATH, Playwright libs, Gitea postadmin/post-git-svc, MinIO mirror). 11 required jobs plus acceptance."
+      "evidence": "T1333 and T1334 both passed local G2 (11 required jobs) and G3 acceptance; T1333 merged as #386, T1334 PR #388."
     }
   ],
-  "conclusion": "WEB-28 is partially proven: the independent worker chain, isolation, structured RESULT, collect, first-review rejection, same-session rework, second-review approve and G2/G3 all ran for real on deepseek-flash. Kimi remains blocked by 429. A termination/disk-recovery drill and a live forged-RESULT rejection are still unrun, so T1329 is not yet complete."
+  "conclusion": "WEB-28 is proved for this round on deepseek-flash: independent spawn, tool use, structured RESULT, collect isolation, independent review, failure/rework, stop/respawn recovery and G2-G4 all ran. Kimi kimi-k3.1-pro-highspeed remains externally blocked by 429 and was explicitly deferred by the owner; it is not claimed. Product U01-U14 remain not_run."
 }

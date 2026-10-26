@@ -1,6 +1,6 @@
 > **V2 开发交接更新（2026-10-26）**：产品访谈 4/4 已确认，交付目标为可部署、功能完整的团队试用版。31 个工作包已注册为正式 **T1301–T1331**（WEB-00 另有 Supervisor 盘点切片 **T1332**）；`v2_required` 与 WEB→T 映射由 `scripts/validate_v2_scope.py` 及其 fixture 套件执行，并接入 `task-state` 作业（结构模式）。旧账本已按 PR #370/#371/#372/#373/#374/#375 校正为 merged。canonical 工作区已迁到 WSL2 **Ubuntu 24.04 `~/post`**；`rddev doctor` 25/27 required，剩 RAM 31 GiB（宿主物理上限）与 bubblewrap 待补。Kimi 端点与凭据可用，但实测返回 429 overloaded，**WEB-28 尚未通过**。以下历史记录保留原样，不作为 V2 已完成的证明。
 
-> **当前这一刻（2026-10-26）**：T1301(#378)、T1332(#382)、T1333(#386) 已合并；安全前置 #380 与 gate 可移植性 #384 也已合并。T1333 是第一个真实独立 Worker：deepseek-flash、独立 worktree、collect 隔离通过、第一轮 Review request_changes（staticcheck U1000）→ 同 session rework → 第二轮 approve、G1–G4 全绿。WEB-28 仍差终止/磁盘恢复演练与 live forged-RESULT 负向注入，T1329 未完成。产品验收 U01–U14 仍全部 `not_run`。
+> **当前这一刻（2026-10-26）**：WEB-28 已完成（T1329，切片 T1333 #386 / T1334 #388）：deepseek-flash 独立 Worker、工具/RESULT/collect 隔离、Review→rework→approve、stop(143)→respawn→恢复、G1–G4 全绿；Kimi 429 由 owner 裁定本轮不强制。T1301 #378、T1332 #382、安全 #380、gate #384 均已合并。下一笔：WEB-01（T1302）真 UI 验收框架。产品验收 U01–U14 仍全部 `not_run`。
 
 > **当前这一刻（2026-09-24 19:05）**：**V1 之后的三笔都在流水线上，本轮我做的全是「验收与订正」——两处后果都已立账，两笔「合并后由我做」的活写在这里。** 驱动的机械段照常跑：T1226 在 `verification`、T1228 在 `verification`（collect 绿、等复核）、**T1223 的返工已交付**（`completed`、exit 0，等 collect）、T1224 在 `accepted`（**PR #370 的 12 项检查全绿**，等驱动腾出手来合并）。驱动此刻正卡在 T1226 的 G2 里（11 个作业的整轮，≈20 分钟），所以 T1224 的合并与 T1223 的 collect 都排在它后面。
 >

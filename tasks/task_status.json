@@ -12804,7 +12804,9 @@
       "status": "todo"
     },
     "T1329": {
-      "status": "todo"
+      "status": "merged",
+      "completed_at": "2026-10-26T14:07:19Z",
+      "notes": "WEB-28 umbrella: T1333 (#385/#386) + T1334 (#387/#388). Kimi 429 deferred by owner; workers ran deepseek-flash. Evidence in tasks/v2/kimi-precheck.json."
     },
     "T1330": {
       "status": "todo"
@@ -12884,7 +12886,105 @@
       "notes": "Issue #385; PR #386. First independent DeepSeek worker; review request_changes -> same-session rework -> approve; G1-G4 green."
     },
     "T1334": {
-      "status": "todo"
+      "status": "merged",
+      "started_at": "2026-10-26T12:20:10Z",
+      "worker_run_id": "run-0ce62c69d9d76cb8",
+      "accepted_by_supervisor_at": "2026-10-26T13:53:41Z",
+      "merged_at": "2026-10-26T14:07:00Z",
+      "rejection_reason": "Second independent review: request_changes. The blocking claim is still true:\ndeleting only the process-group kill passes in 10.03s, because stopAttemptGroup\nends with a blocking cmd.Wait(); the helper's 10s hold expires, Wait reaps the\nunstoppped child, and the caller's waitGone then sees a dead pid.\n\nFix the ordering and the bound, inside tests/worker-recovery/**:\n\n1) BLOCKING — make the stop discriminating for attempt 1 too:\n   - Hold for substantially longer than the stop deadline (e.g. hold 60s,\n     stopTimeout 5s).\n   - Send the group kill, then poll the RAW pid BEFORE any blocking Wait:\n     missing /proc/<pid> or state Z counts as \"not running\"; a live R/S state\n     after stopTimeout fails the test. Only then Wait() to reap.\n   - Deleting only `syscall.Kill(-pid, SIGKILL)` must now fail with\n     \"attempt 1 still alive 5s after the stop\", not pass after 10s.\n   - Keep the detached-grandchild raw-pid check and its cleanup.\n\n2) MAJOR — correct the documentation to match what is actually discriminating.\n   README.md:16, the package comment, stopAttemptGroup's comment and the\n   stopTimeout comment currently claim a surviving attempt 1 fails; until (1)\n   is true, those sentences are false. After (1), re-check every sentence.\n\n3) MINOR — RESULT discrimination evidence: run and record the missing case\n   (drop ONLY the process-group kill). Name the current run id (the registry's\n   run-e181356120247d65 / the 12:15:36 collect), not run-709bfd0a (the earlier\n   attempt). Correct acceptance[1] wording.\n\n4) NIT — fix 'unstoppped'; register the grandchild cleanup even when the pid\n   file read times out (or capture the pid robustly).\n\nRe-run `go test -count=1 ./tests/worker-recovery/`, `bash scripts/staticcheck.sh`,\nand the mutation checks; record exact commands and real outputs.\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-26T12:03:22Z",
+          "run_id": "run-10ab9cf3df38ac89"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-26T12:03:29Z",
+          "run_id": "run-06c2277e14078263",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-26T12:03:38Z",
+          "run_id": "run-6e314fb35a9ab0a4",
+          "reason": "WEB-28 recovery drill (Supervisor action): attempt 1 was deliberately stopped with\n`rddev worker stop T1334` (exit 143) after spawn, to prove the task can be\nre-dispatched from disk state. This is not a code rejection.\n\nRespawn as a NEW Worker on the same baseline; do not reuse attempt 1's RESULT or\npartial files. Write the minimal tests/worker-recovery/ probe, run\n`go test -count=1 ./tests/worker-recovery/`, and return a fresh RESULT.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-26T12:03:39Z",
+          "run_id": "run-709bfd0a9c4683d2",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-26T12:07:28Z",
+          "run_id": "run-eeeadfefdf2e28da",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-26T12:12:14Z",
+          "run_id": "run-f5b2e2955c014979",
+          "reason": "Independent review: request_changes. The sample currently gives false comfort.\nFix the test's discrimination, stay inside tests/worker-recovery/**.\n\n1) BLOCKING — \"no live process\" cannot fail. `hold.Process.Signal(syscall.Signal(0))`\nis evaluated after `hold.Wait()` has reaped the child; Go returns ErrProcessDone\nwithout a syscall, so the assertion is true after any Wait. Reviewer reproduced:\ndeleting the Kill still passes (after the helper's 10s sleep), and a detached\nsetsid grandchild left running also passes. Make it discriminating: stop the\nwhole process group (or at least the child and a detached grandchild), check\nthe raw pid with syscall.Kill(pid, 0) / /proc BEFORE and AFTER, and fail if the\nprocess (or grandchild) is still alive. Removing the stop or leaving a survivor\nmust turn the test red.\n\n2) MAJOR — \"respawn reads attempt 1's state\" is not tested. The parent only\ninspects JSON the child wrote; fabricating attempt=2/resumed_from=1 passes.\nHave attempt 1 write a per-run nonce into the state file, and require attempt 2\nto echo that nonce; the parent asserts it. A from-scratch restart must fail.\n\n3) MAJOR — RESULT lists deliberately failing commands as `passed` (entries 4-6\nand the `ps|grep` entry 9), and 4-6 reuse the required-test label. Keep only\ncommands that really passed in `tests`; put mutation observations in the\nacceptance evidence or notes. The two required tests must have genuine passing\nentries.\n\n4) MINOR — the probe fixture is committed with the change, so the test cannot\ndistinguish \"attempt 2 wrote it\" from \"it arrived with the patch\". Make the\nprobe content depend on the attempt-2 nonce, and state the boundary.\n\n5) NIT — don't append a duplicate env key; build the child environment explicitly.\n\nRe-run `go test -count=1 ./tests/worker-recovery/` and record exact commands\nand real outputs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-26T12:12:15Z",
+          "run_id": "run-e181356120247d65",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-26T12:15:36Z",
+          "run_id": "run-5f6fbfe977b6de88",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-26T12:20:10Z",
+          "run_id": "run-39a3505ac7338cdd",
+          "reason": "Second independent review: request_changes. The blocking claim is still true:\ndeleting only the process-group kill passes in 10.03s, because stopAttemptGroup\nends with a blocking cmd.Wait(); the helper's 10s hold expires, Wait reaps the\nunstoppped child, and the caller's waitGone then sees a dead pid.\n\nFix the ordering and the bound, inside tests/worker-recovery/**:\n\n1) BLOCKING — make the stop discriminating for attempt 1 too:\n   - Hold for substantially longer than the stop deadline (e.g. hold 60s,\n     stopTimeout 5s).\n   - Send the group kill, then poll the RAW pid BEFORE any blocking Wait:\n     missing /proc/<pid> or state Z counts as \"not running\"; a live R/S state\n     after stopTimeout fails the test. Only then Wait() to reap.\n   - Deleting only `syscall.Kill(-pid, SIGKILL)` must now fail with\n     \"attempt 1 still alive 5s after the stop\", not pass after 10s.\n   - Keep the detached-grandchild raw-pid check and its cleanup.\n\n2) MAJOR — correct the documentation to match what is actually discriminating.\n   README.md:16, the package comment, stopAttemptGroup's comment and the\n   stopTimeout comment currently claim a surviving attempt 1 fails; until (1)\n   is true, those sentences are false. After (1), re-check every sentence.\n\n3) MINOR — RESULT discrimination evidence: run and record the missing case\n   (drop ONLY the process-group kill). Name the current run id (the registry's\n   run-e181356120247d65 / the 12:15:36 collect), not run-709bfd0a (the earlier\n   attempt). Correct acceptance[1] wording.\n\n4) NIT — fix 'unstoppped'; register the grandchild cleanup even when the pid\n   file read times out (or capture the pid robustly).\n\nRe-run `go test -count=1 ./tests/worker-recovery/`, `bash scripts/staticcheck.sh`,\nand the mutation checks; record exact commands and real outputs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-26T12:20:10Z",
+          "run_id": "run-0ce62c69d9d76cb8",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-26T12:22:42Z",
+          "run_id": "run-cc9f1915736cadc4",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-26T13:53:41Z",
+          "run_id": "run-9d55ffa7b077d32d"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-26T14:07:00Z",
+          "run_id": "run-c30cc29bda86f240",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ],
+      "completed_at": "2026-10-26T14:07:19Z",
+      "notes": "Issue #387; PR #388. stop (exit 143) -> reject -> respawn -> collect -> three reviews (two request_changes, one approve) -> G1-G4."
     }
   },
   "version": 2
