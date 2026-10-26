@@ -99,6 +99,7 @@
 - [71_V2_PRODUCT_DISCOVERY.md](71_V2_PRODUCT_DISCOVERY.md)：Owner 已确认决定，产品访谈 4/4 已结束。
 - [72_V2_CLAUDE_CODE_HANDOFF.md](72_V2_CLAUDE_CODE_HANDOFF.md)：Claude Code/Kimi 预检、持续监督、独立 Worker、GitHub 流程与恢复。
 - [73_V2_ESTIMATE_AND_EXECUTION.md](73_V2_ESTIMATE_AND_EXECUTION.md)：单 Agent 与 Supervisor/Worker 比较、工期假设及风险。
+- [74_V2_CONTRACT_INVENTORY.md](74_V2_CONTRACT_INVENTORY.md)：WEB-00 源码盘点、G01–G27 证据与三个后端断点。
 - [V2_CLAUDE_CODE_PROMPT.md](../V2_CLAUDE_CODE_PROMPT.md)：可直接交给 Claude Code 的启动提示。
 - [tasks/v2/README.md](../tasks/v2/README.md)：机器清单、网页验收清单与文档校验命令。
 - [ADR-029](adr/ADR-029-optional-drive-with-persistent-supervision.md)：取消 drive 强绑定，保留持续监督和验收边界。

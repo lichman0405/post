@@ -1,0 +1,545 @@
+{
+  "version": "1.0",
+  "task": "T1332",
+  "web_package": "WEB-00",
+  "base_commit": "c03725682e59f0c98fc4e2a09c77e481dda4e38c",
+  "generated": "2026-10-26",
+  "method": "docs/70 §3 source audit + targeted source checks on 2026-10-26. Only rows whose paths were re-read this round are marked verified; the rest inherit docs/70's audit and are not product evidence.",
+  "product_tests_run": false,
+  "rows": [
+    {
+      "id": "G01",
+      "capability": "注册、登入、个人资料",
+      "evidence": [
+        "apps/web/app/(auth)/login/login-card.tsx",
+        "apps/web/app/(auth)/login/page.tsx",
+        "cmd/api/authhttp/**"
+      ],
+      "ui_entry": "login-card.tsx (signup mode)",
+      "api_contract": "authhttp",
+      "verdict": "source_present",
+      "owning_task": "WEB-02",
+      "reverified_this_round": true,
+      "note": "注册/登入同一页的 signup 模式；无独立 /signup 路由，不构成缺失。"
+    },
+    {
+      "id": "G02",
+      "capability": "Home 工作台",
+      "evidence": [
+        "apps/web/app/(main)/page.tsx"
+      ],
+      "ui_entry": "/ (main page)",
+      "api_contract": "-",
+      "verdict": "partial",
+      "owning_task": "WEB-02",
+      "reverified_this_round": false,
+      "note": "当前首页以服务/认证状态为主；My Projects、待办与研究入口未形成工作台。"
+    },
+    {
+      "id": "G03",
+      "capability": "建立 Organization、邀请成员",
+      "evidence": [
+        "apps/web/app/(main)/organizations/page.tsx",
+        "apps/web/app/(main)/organizations/[slug]/page.tsx",
+        "cmd/api/orgshttp/**",
+        "internal/application/orgs/**"
+      ],
+      "ui_entry": "/organizations",
+      "api_contract": "orgshttp",
+      "verdict": "partial",
+      "owning_task": "WEB-03",
+      "reverified_this_round": false,
+      "note": "页面按 slug 查询 Profile；后端有组织/成员操作，缺少建立、邀请、角色管理的完整主 UI。"
+    },
+    {
+      "id": "G04",
+      "capability": "建立 Project",
+      "evidence": [
+        "apps/web/app/(main)/projects/project-directory.tsx",
+        "apps/web/lib/projects.ts",
+        "cmd/api/projectshttp/**"
+      ],
+      "ui_entry": "/projects",
+      "api_contract": "projectshttp",
+      "verdict": "missing",
+      "owning_task": "WEB-04",
+      "reverified_this_round": true,
+      "note": "project-directory 只列出与跳转；projects.ts 没有 create。后端有 POST projects。"
+    },
+    {
+      "id": "G05",
+      "capability": "Branch 与研究状态",
+      "evidence": [
+        "cmd/api/rsghttp/wiring.go",
+        "internal/application/branches/service.go",
+        "apps/web/app/(main)/projects/[id]/research/page.tsx"
+      ],
+      "ui_entry": "/projects/[id]/research (overview only)",
+      "api_contract": "rsghttp",
+      "verdict": "missing",
+      "owning_task": "WEB-06",
+      "reverified_this_round": true,
+      "note": "后端有 POST branches/objects/relations；Web 没有建立/切换 branch 或记录变更的工作流。"
+    },
+    {
+      "id": "G06",
+      "capability": "Object Detail、Research Map",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/research/page.tsx",
+        "cmd/api/rsghttp/page.go",
+        "cmd/api/rsghttp/graph.go"
+      ],
+      "ui_entry": "/projects/[id]/research",
+      "api_contract": "rsghttp",
+      "verdict": "partial",
+      "owning_task": "WEB-05",
+      "reverified_this_round": true,
+      "note": "Research 页是 overview 卡片；对象详情/版本历史/可到达 drill-down 未确认。"
+    },
+    {
+      "id": "G07",
+      "capability": "Web 变更与 Git/RSG 一致",
+      "evidence": [
+        "internal/application/rsg/service.go",
+        "internal/application/rsg/evidence.go",
+        "internal/application/rsg/overview.go",
+        "cmd/api/mergegit/bridge.go",
+        "internal/application/merge/service.go",
+        "internal/gitprovider/**"
+      ],
+      "ui_entry": "none",
+      "api_contract": "rsghttp / mergegit",
+      "verdict": "missing",
+      "owning_task": "WEB-07",
+      "reverified_this_round": true,
+      "note": "RSG 写入经 states.Service.Commit 落 PostgreSQL，状态行只有可空的 GitCommitSHA；provider ref 只在 merge 侧经 mergegit 前进。Web 语义变更没有自己的 provider 写入路径。这是 WEB-00 查出的第一个硬断点。"
+    },
+    {
+      "id": "G08",
+      "capability": "Evidence/Provenance",
+      "evidence": [
+        "cmd/api/evidencehttp/**",
+        "cmd/api/provenancehttp/**",
+        "internal/application/evidencegraph/**",
+        "internal/application/evidencenetwork/**",
+        "apps/web/app/(main)/projects/[id]/research/page.tsx"
+      ],
+      "ui_entry": "/projects/[id]/research",
+      "api_contract": "evidencehttp / provenancehttp",
+      "verdict": "partial",
+      "owning_task": "WEB-10",
+      "reverified_this_round": true,
+      "note": "有后端读写与图面板；缺完整对象上的录入、固定来源版本与正反证据 UI。"
+    },
+    {
+      "id": "G09",
+      "capability": "Issues/Discussion",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/issues/page.tsx",
+        "cmd/api/discussionhttp/**",
+        "internal/application/discussions/**"
+      ],
+      "ui_entry": "/projects/[id]/issues",
+      "api_contract": "discussionhttp",
+      "verdict": "missing",
+      "owning_task": "WEB-11",
+      "reverified_this_round": true,
+      "note": "页面是硬编码 MOF 记录；Discussion client 存在不等于真实 Issues 列表/新建可用。"
+    },
+    {
+      "id": "G10",
+      "capability": "PR 建立/送审/评审/合并",
+      "evidence": [
+        "apps/web/lib/pulls.ts",
+        "apps/web/app/(main)/projects/[id]/pulls/[number]/page.tsx",
+        "cmd/api/pullrequestshttp/**",
+        "cmd/api/reviewhttp/**"
+      ],
+      "ui_entry": "/projects/[id]/pulls",
+      "api_contract": "pullrequestshttp / reviewhttp",
+      "verdict": "partial",
+      "owning_task": "WEB-12/13/14",
+      "reverified_this_round": true,
+      "note": "列表、diff、评审表单已有；pulls.ts 写操作只有 submitReview，缺建立、送审、合并 UI。"
+    },
+    {
+      "id": "G11",
+      "capability": "Scientific Conflict",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/conflicts/page.tsx",
+        "cmd/api/conflicthttp/**",
+        "internal/application/resolutions/**"
+      ],
+      "ui_entry": "/projects/[id]/conflicts",
+      "api_contract": "conflicthttp",
+      "verdict": "source_present",
+      "owning_task": "WEB-13",
+      "reverified_this_round": true,
+      "note": "冲突页与决策保存存在；仍需从正常 PR 导航提供 comparison context。"
+    },
+    {
+      "id": "G12",
+      "capability": "Freeze/Abort/Reopen/Policy",
+      "evidence": [
+        "cmd/api/freezehttp/**",
+        "cmd/api/aborthttp/**",
+        "internal/application/mainfreeze/**",
+        "internal/application/aborts/**",
+        "internal/application/reopens/**",
+        "apps/web/app/(main)/projects/[id]/settings/page.tsx"
+      ],
+      "ui_entry": "/projects/[id]/settings",
+      "api_contract": "freezehttp / aborthttp / policyhttp",
+      "verdict": "partial",
+      "owning_task": "WEB-14/23",
+      "reverified_this_round": false,
+      "note": "有后端；Settings 只改部分字段/角色，可见性固定 disabled；缺治理入口与影响预览。"
+    },
+    {
+      "id": "G13",
+      "capability": "Release/Milestones",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/releases/page.tsx",
+        "cmd/api/releasehttp/**",
+        "cmd/api/milestonehttp/**"
+      ],
+      "ui_entry": "/projects/[id]/releases",
+      "api_contract": "releasehttp / milestonehttp",
+      "verdict": "source_present",
+      "owning_task": "WEB-15",
+      "reverified_this_round": true,
+      "note": "建立表单存在并按角色显示；需真实 Web 变更经合并后重验。"
+    },
+    {
+      "id": "G14",
+      "capability": "首次 Publish Asset",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/assets/publish/page.tsx",
+        "apps/web/lib/publish.ts",
+        "cmd/api/assetshttp/handlers.go",
+        "internal/application/assetpublish/command.go"
+      ],
+      "ui_entry": "/projects/[id]/assets/publish",
+      "api_contract": "assetshttp",
+      "verdict": "partial",
+      "owning_task": "WEB-16",
+      "reverified_this_round": true,
+      "note": "有 preview/publish 命令与候选构造（newAsset 分支存在）；缺从 accepted state/Release 的完整首次发布 Web 旅程验收。"
+    },
+    {
+      "id": "G15",
+      "capability": "Knowledge 发布/详情",
+      "evidence": [
+        "cmd/api/knowledgehttp/**",
+        "internal/application/knowledgepublish/**",
+        "apps/web/app/(main)/explore/explore-tabs.tsx"
+      ],
+      "ui_entry": "Explore (no KnowledgeRow link)",
+      "api_contract": "knowledgehttp",
+      "verdict": "missing",
+      "owning_task": "WEB-17",
+      "reverified_this_round": true,
+      "note": "后端有知识读与发布路由；Explore 的 KnowledgeRow 刻意不提供连结，缺公开版本页。"
+    },
+    {
+      "id": "G16",
+      "capability": "Search → Project",
+      "evidence": [
+        "apps/web/lib/search.ts",
+        "apps/web/app/(main)/search/page.tsx",
+        "cmd/api/searchhttp/draft.go"
+      ],
+      "ui_entry": "/search",
+      "api_contract": "searchhttp",
+      "verdict": "partial",
+      "owning_task": "WEB-19",
+      "reverified_this_round": true,
+      "note": "答案页已有，SearchClient 只有 search；后端有 start-project/draft confirm，缺 draft 预览/确认 UI。"
+    },
+    {
+      "id": "G17",
+      "capability": "Reference/Dependency/Fork/Derive",
+      "evidence": [
+        "cmd/api/forkshttp/**",
+        "internal/application/forks/**",
+        "internal/application/relations/**",
+        "apps/web/app/(main)/assets/**"
+      ],
+      "ui_entry": "/assets/[pid]",
+      "api_contract": "forkshttp / assetshttp",
+      "verdict": "partial",
+      "owning_task": "WEB-20",
+      "reverified_this_round": true,
+      "note": "Asset 可浏览、后端有若干操作；缺可连续使用的四类动作入口与 lineage 呈现。"
+    },
+    {
+      "id": "G18",
+      "capability": "外部提案与贡献",
+      "evidence": [
+        "cmd/api/forkshttp/**",
+        "cmd/api/knowledgehttp/**",
+        "internal/application/contribution/**",
+        "tests/e2e-pr-flows/**"
+      ],
+      "ui_entry": "none",
+      "api_contract": "forkshttp / knowledgehttp",
+      "verdict": "partial",
+      "owning_task": "WEB-21",
+      "reverified_this_round": true,
+      "note": "有后端和历史 E2E；尚无完整外部使用者 UI 路径。"
+    },
+    {
+      "id": "G19",
+      "capability": "People/Organizations 发现",
+      "evidence": [
+        "apps/web/app/(main)/people/page.tsx",
+        "apps/web/app/(main)/users/[id]/page.tsx",
+        "apps/web/app/(main)/organizations/[slug]/page.tsx"
+      ],
+      "ui_entry": "/people (ComingSoon), /users/[id]",
+      "api_contract": "explorehttp / profilehttp",
+      "verdict": "partial",
+      "owning_task": "WEB-18",
+      "reverified_this_round": true,
+      "note": "People 仍 ComingSoon；有个人/组织 Profile；公开组织目录不能由 UI 自行推定。"
+    },
+    {
+      "id": "G20",
+      "capability": "Watch/Inbox/依赖预警",
+      "evidence": [
+        "apps/web/app/(main)/notifications/page.tsx",
+        "apps/web/lib/inbox.ts",
+        "cmd/api/inboxhttp/**",
+        "cmd/api/subscriptionshttp/**"
+      ],
+      "ui_entry": "/notifications",
+      "api_contract": "inboxhttp / subscriptionshttp",
+      "verdict": "partial",
+      "owning_task": "WEB-22",
+      "reverified_this_round": true,
+      "note": "Inbox 已有已读等操作；未找到完整 Follow/Watch/偏好/依赖处置入口。"
+    },
+    {
+      "id": "G21",
+      "capability": "Files/附件/导出",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/files/page.tsx",
+        "cmd/api/fileshttp/files.go",
+        "internal/assets/preview.go",
+        "internal/persistence/queries/blobs.sql"
+      ],
+      "ui_entry": "/projects/[id]/files",
+      "api_contract": "fileshttp (Git raw) / assetshttp (blob metadata)",
+      "verdict": "missing",
+      "owning_task": "WEB-09",
+      "reverified_this_round": true,
+      "note": "Git-backed Files 有 raw 下载通道；S3 blob attachments 只有 access_level/预览元数据，找不到 blob 下载路由。Public metadata 不代表 blob open；研究上下文上传/下载未接通。"
+    },
+    {
+      "id": "G22",
+      "capability": "项目工作事项与研究记录",
+      "evidence": [
+        "apps/web/app/(main)/projects/[id]/research/page.tsx",
+        "internal/application/sciobjects/**"
+      ],
+      "ui_entry": "/projects/[id]/research",
+      "api_contract": "rsghttp",
+      "verdict": "missing",
+      "owning_task": "WEB-08",
+      "reverified_this_round": false,
+      "note": "V2 扩展；尚无完整的计划→记录→观察→外部 run→提案 Web 旅程。"
+    },
+    {
+      "id": "G23",
+      "capability": "可用性与真实 UI Gate",
+      "evidence": [
+        "tests/**",
+        "tests/e2e-*/**",
+        ".github/workflows/ci.yml"
+      ],
+      "ui_entry": "-",
+      "api_contract": "-",
+      "verdict": "partial",
+      "owning_task": "WEB-01/25",
+      "reverified_this_round": true,
+      "note": "现有浏览器测试混合 UI、直接 fetch、CLI Git 和预播种；无独立 blocking UI 全流程 suite。"
+    },
+    {
+      "id": "G24",
+      "capability": "项目模板与补充字段",
+      "evidence": [
+        "cmd/api/templateshttp/**",
+        "cmd/api/schemaprofileshttp/**",
+        "internal/application/templates/**",
+        "internal/application/schemaprofiles/**"
+      ],
+      "ui_entry": "none",
+      "api_contract": "templateshttp / schemaprofileshttp",
+      "verdict": "missing",
+      "owning_task": "WEB-26",
+      "reverified_this_round": true,
+      "note": "V2 新增；后端有模板/schema profile 面，但 Web 路由与 Settings 未见项目级模板配置流程。"
+    },
+    {
+      "id": "G25",
+      "capability": "数据预览与基础分析",
+      "evidence": [
+        "internal/assets/preview.go",
+        "cmd/api/fileshttp/files.go",
+        "services/scientific-adapter/**",
+        "apps/web/**"
+      ],
+      "ui_entry": "Files preview only",
+      "api_contract": "fileshttp / scientific adapter",
+      "verdict": "partial",
+      "owning_task": "WEB-27",
+      "reverified_this_round": true,
+      "note": "V2 新增；通用文件预览有源码基础；用户主动作图/统计/拟合与结果保存/追溯未完成。"
+    },
+    {
+      "id": "G26",
+      "capability": "可部署团队试用版",
+      "evidence": [
+        "docs/35_DEPLOYMENT_RUNBOOK.md",
+        "docs/36_RELEASE_RUNBOOK.md",
+        "docs/37_BACKUP_DR.md",
+        "ops/**"
+      ],
+      "ui_entry": "-",
+      "api_contract": "-",
+      "verdict": "partial",
+      "owning_task": "WEB-29/30",
+      "reverified_this_round": true,
+      "note": "有历史 runbook；不等于 V2 新功能已部署、迁移、恢复验收。"
+    },
+    {
+      "id": "G27",
+      "capability": "Kimi 与持续监督链路",
+      "evidence": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+        "docs/62_SUPERVISOR_GOVERNANCE.md"
+      ],
+      "ui_entry": "-",
+      "api_contract": "-",
+      "verdict": "unverified",
+      "owning_task": "WEB-28",
+      "reverified_this_round": true,
+      "note": "本仓库尚无本轮 Kimi 工具/RESULT/恢复实测；2026-10-26 端点认证可用但返回 429。hello、模型名显示或 token 速度都不能替代 WEB-28。"
+    }
+  ],
+  "breakpoints": [
+    {
+      "id": "BP-G07",
+      "title": "Web 科研变更到 provider ref / Git",
+      "verdict": "missing",
+      "evidence": [
+        "internal/application/rsg/service.go / evidence.go 把写入交给 states.Service.Commit；状态行只有可空 GitCommitSHA。",
+        "internal/application/merge/service.go + cmd/api/mergegit/bridge.go 才调用 provider 合并/前进 ref。",
+        "cmd/api/rsghttp/wiring.go 的 Service 接口没有 GitProvider 写入端口。"
+      ],
+      "owning_task": "T1308 (WEB-07)",
+      "decision": "WEB-07 必须先设计并实现 provider 写入/失败重试/reconciliation；必要时先写 ADR。不得用 CLI git、mock provider 或只断言 DB 成功收尾。"
+    },
+    {
+      "id": "BP-FIRST-PUBLISH",
+      "title": "首次 Asset 发布（无既存 Asset）",
+      "verdict": "source_present_but_unverified",
+      "evidence": [
+        "internal/application/assetpublish/command.go 的 prepare 返回 newAsset 布尔，存在首次创建分支。",
+        "cmd/api/assetshttp/handlers.go 有 preview 与 publish 路由。",
+        "apps/web/app/(main)/projects/[id]/assets/publish/page.tsx 与 lib/publish.ts 提供 Web 入口。"
+      ],
+      "owning_task": "T1317 (WEB-16)",
+      "decision": "源码存在不等于首次发布旅程已通；WEB-16 必须从 accepted state/Release 在空 Asset 项目走完四类型，不能用预建 Asset 或 API 代行。"
+    },
+    {
+      "id": "BP-BLOB-DOWNLOAD",
+      "title": "研究上下文附件（S3 blob）下载",
+      "verdict": "missing",
+      "evidence": [
+        "cmd/api/fileshttp/files.go 的 /files/raw 只流式转发 Git provider 的 blob。",
+        "internal/assets/preview.go 与 blob_attachments 只提供 access_level/预览元数据。",
+        "在 cmd/api 下 grep 不到 blob attachment 的下载/预签名路由。"
+      ],
+      "owning_task": "T1310 (WEB-09)",
+      "decision": "WEB-09 需要新增受权限约束的 blob 下载通道；Public metadata 不等于 blob open，Restricted/private 必须拒绝匿名与无权账号。"
+    }
+  ],
+  "verdict_counts": {
+    "source_present": 3,
+    "partial": 15,
+    "missing": 8,
+    "unverified": 1
+  },
+  "web_routes": [
+    "(auth)/login/page.tsx",
+    "(main)/assets/[pid]/[version]/page.tsx",
+    "(main)/assets/[pid]/page.tsx",
+    "(main)/assets/page.tsx",
+    "(main)/attestations/[pid]/page.tsx",
+    "(main)/explore/page.tsx",
+    "(main)/notifications/page.tsx",
+    "(main)/organizations/[slug]/page.tsx",
+    "(main)/organizations/page.tsx",
+    "(main)/page.tsx",
+    "(main)/people/page.tsx",
+    "(main)/projects/[id]/activity/page.tsx",
+    "(main)/projects/[id]/assets/page.tsx",
+    "(main)/projects/[id]/assets/publish/page.tsx",
+    "(main)/projects/[id]/conflicts/page.tsx",
+    "(main)/projects/[id]/files/page.tsx",
+    "(main)/projects/[id]/issues/page.tsx",
+    "(main)/projects/[id]/milestones/page.tsx",
+    "(main)/projects/[id]/page.tsx",
+    "(main)/projects/[id]/pulls/[number]/page.tsx",
+    "(main)/projects/[id]/pulls/page.tsx",
+    "(main)/projects/[id]/releases/[releaseId]/page.tsx",
+    "(main)/projects/[id]/releases/page.tsx",
+    "(main)/projects/[id]/research/page.tsx",
+    "(main)/projects/[id]/settings/page.tsx",
+    "(main)/projects/page.tsx",
+    "(main)/search/page.tsx",
+    "(main)/users/[id]/page.tsx"
+  ],
+  "api_packages": [
+    "aborthttp",
+    "assetshttp",
+    "attestationhttp",
+    "audithttp",
+    "authhttp",
+    "backupdr",
+    "conflicthttp",
+    "discussionhttp",
+    "evidencehttp",
+    "explorehttp",
+    "feedshttp",
+    "fileshttp",
+    "forkshttp",
+    "freezehttp",
+    "gittokenshttp",
+    "inboxhttp",
+    "knowledgehttp",
+    "mergegit",
+    "mergehttp",
+    "milestonehttp",
+    "notificationshttp",
+    "orgshttp",
+    "policyhttp",
+    "profilehttp",
+    "projectshttp",
+    "provenancehttp",
+    "pullrequestshttp",
+    "releasehttp",
+    "researchprofilehttp",
+    "reviewhttp",
+    "rsghttp",
+    "schemaprofileshttp",
+    "searchhttp",
+    "subscriptionshttp",
+    "templateshttp",
+    "validationhttp",
+    "webhookshttp"
+  ]
+}
