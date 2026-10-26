@@ -1,8 +1,48 @@
 # 实现期决策记录
 
+> 2026-10-26 更新：Owner 明确要求「取消rddev drive的硬约束使用条件」。已由 Supervisor 更新 CLAUDE.md §8.2 与研发交接规约；架构决定见 [ADR-029](../docs/adr/ADR-029-optional-drive-with-persistent-supervision.md)。仅取消 drive 强绑定，保留独立 Worker、Git 控制边界、G1–G4 和持续恢复责任；历史记录不改写。
+
+> 2026-10-26 V2 交接：Owner 的 4/4 产品访谈已完成，选择可部署、功能完整的团队试用版。全部批准决定见 [docs/71](../docs/71_V2_PRODUCT_DISCOVERY.md)，完整范围和优先级见 [docs/70](../docs/70_WEB_OPERABILITY_V2_PLAN.md)，Claude Code 执行入口见 [启动提示](../V2_CLAUDE_CODE_PROMPT.md)。交接清单为31个工作包、14条网页旅程／81步；正式 DAG 注册和产品实现尚未开始，文档校验通过不等于产品 Gate 通过。后续按原权限与完整 Issue→分支→Commit→Push→PR→CI→Merge 链持续推进。
+
 仅记录无需 ADR 的小型工程决策。格式：日期 / Task / 决策 / 原因 / 可逆性。
 
 ---
+
+## L1-20261026-1 — V2 任务编号与独立投影
+
+- **决策**：WEB-00→T1301 … WEB-30→T1331；WEB-00 的契约盘点切片为 T1332。V2 任务置
+  `v2_required=true`、`v1_required=false`、`web_package=WEB-NN`。`scripts/validate_v2_scope.py`
+  是投影的执行器：CI `task-state` 作业跑结构模式；`--complete` 只在最终 V2 Gate 使用。
+  `internal/devorchestrator.TaskSpec` 读取这两个字段，`dag_v2_test.go` 钉住“V2 不得进入 V1 分母”。
+- **原因**：backlog.json 不能当运行账本；只写一个没人执行的字段等于没有投影。
+- **可逆性**：可逆；拆分切片可新增 T1333+，但必须保持映射 1:1 与依赖无环。
+
+## L1-20261026-2 — Canonical 工作区迁移
+
+- **决策**：开发与 Gate 统一在 WSL2 **Ubuntu 24.04.5 LTS** 的 `/home/lishi/post`（ext4）执行；
+  Windows 的 `C:\Users\lishi\code\post` 保留为迁移前备份，不删除。迁移后逐文件核对
+  `git status` 与 `git diff` 字节一致。Node 24.22.1、pnpm 12.4.1、Go 1.27.3、uv 0.13.5、
+  Docker 29.1.3 已装。
+- **环境偏差**：宿主 32 GB RAM 在 WSL 中可见 31 GiB，低于 doctor 的 32 GiB required；这是物理
+  上限，不是配置遗漏，已记录为已知限制。doctor 其余 required 通过。
+- **可逆性**：可逆；Windows 备份保持原状。
+
+## L1-20261026-3 — V2 任务的临时 G3 接线
+
+- **决策**：注册时为 32 笔 V2 任务填写 G3 override：T1325 用 `a11y`+`i18n`，其余用
+  `acceptance`。这是为了满足“live phase 不得无 G3”的现有检查，**不表示** `acceptance` 已覆盖
+  V2 新旅程。WEB-01 交付专用 journeys 作业后，必须逐笔把 override 收紧到真实断言的任务，
+  并在 WEB-25 前完成。
+- **原因**：不填会让 P14 以 `not_required` 通过 G3；填一个无关的新作业会让任务永远红。
+- **可逆性**：可逆；override 是配置，不是产品语义。
+
+## L1-20261026-4 — Kimi 端点预检
+
+- **决策**：复用本机既有 Kimi provider（`https://api.moonshot.cn/anthropic`，
+  `kimi-k3.1-pro-highspeed`，凭据已配置）。2026-10-26 实测认证通过、服务返回
+  `429 engine_overloaded_error`；不做凭据变更，重试后按 WEB-28 记录。模型名显示或单次 hello
+  都不算 WEB-28 通过。
+- **可逆性**：可逆；仅使用既有账号。
 
 ## L3-20260912-1 — Repository visibility（已由 owner 裁定）
 

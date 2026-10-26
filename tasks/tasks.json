@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 172,
+  "task_count": 204,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -15,7 +15,8 @@
     "P10": "Research Events、订阅与 Impact Analysis",
     "P11": "UI、安全、可访问性、性能与运维加固",
     "P12": "Canonical Workflow 与最终交付",
-    "P13": "V1 之后的加固：流水线自己的可信度"
+    "P13": "V1 之后的加固：流水线自己的可信度",
+    "P14": "V2 可部署团队试用版"
   },
   "tasks": [
     {
@@ -10097,6 +10098,1919 @@
       ],
       "scope_note": "**这一笔是 T1226 那一笔的代价，不是新发现。** T1226 把 a11y 扫描从回退态挪到「带引用」那支（那是对的，回退态被记成「有数据」正是它要修的缺陷），但**回退态的无障碍测量因此掉出了活入口**：a11y 作业不再扫它，剩下唯一的 axe 扫描住在 `tests/e2e-search/`——那条路没有任何活入口（`privacy-suite.sh` 的 `BROWSER_SUITES` 不含 `search`，而它自己也没有 CI 调用者）。**我的任务书当时只说「让判据落到带引用那支」，没说「挪走的那一层不能掉出活入口」**——这一笔补上。同笔收回两处同族假话（`a11y-smoke.mjs` 的注释、`keyboard-checklist.md` 的一句），它们都在为已经修掉的那个缺陷辩护。",
       "supervisor_scope_narrowing": "**为什么只开这几个位置：**\n\n  * `tests/web-smoke/a11y-smoke.mjs` 与 `tests/web-smoke/a11y-harness/**` 是扫描判据与播种数据所在。\n  * `run-a11y.sh` / `run-i18n.sh` / `i18n-smoke.mjs` 是同一台仪器的消费者，夹具一改它们可能要跟着动——**开它们是因为它们是这台仪器的一部分**，不是预期它们要改。\n  * `keyboard-checklist.md` 是这台套件的人肉走查文档，那句同族假话在它里面。\n\n**为什么不开整个 `tests/web-smoke/**`：** 那会把 `baseline/**`（17 张二进制视觉基线）和另外几台套件（`visual-smoke.mjs`、`style-parity.mjs`、`visual-regression.mjs`）一起圈进来。本笔不该改任何像素，也不该顺手改别的仪器。\n\n**为什么不开 `apps/**`：** 判据要用的钩子产品里已经有了（`data-search-citation`、`data-search-fallback`），**只读**引用即可。\n\n**为什么 G3 是这两个：** `a11y` 与 `i18n` 正是这台 harness 的两个消费者，也都是 required job，都跑真 Chromium。本笔的产物是「回退态又被 a11y 作业扫到了」，这两个作业就是它最贴的端到端判据。\n\n**这是 L1，不是 L3**：把一条已经存在的扫描放回它原来所在的作业里、把两句假话改真。不新增权限、不改产品语义、不放松任何 Gate（判据是**加**一条能红的断言，并且**禁止**删除或放宽既有的）。"
+    },
+    {
+      "id": "T1301",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-00 基准与契约盘点",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-00",
+      "dependencies": [],
+      "requirements": [
+        "锁定 commit、路由／角色／动作清单、G01–G27 逐格证据；先查 G07、首次发布、附件下载的后端断点",
+        "把规划编号映射为正式 T 任务；不得把清单误当运行状态",
+        "先同步批准的角色/公开规则、OpenAPI 和验收命令；在安全窗口再改指纹输入",
+        "只在 WEB-00 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "锁定 commit、路由／角色／动作清单、G01–G27 逐格证据；先查 G07、首次发布、附件下载的后端断点",
+        "WEB-00 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "每个承诺动作都有 UI 入口、服务契约、情境编号；缺口标为未通，不能用历史绿灯代填"
+      ],
+      "tests": [
+        "v2 projection validator: all 31 packages mapped, v1_required untouched",
+        "v2 projection fixture: an unmapped package and a v2 task marked v1_required both fail",
+        "task DAG, status and tests ledgers cover all 32 registered V2 tasks"
+      ],
+      "allowed_scope": [
+        "tasks/tasks.json",
+        "tasks/task_status.json",
+        "tasks/tests.json",
+        "tasks/progress.md",
+        "tasks/decisions.md",
+        "tasks/v2/**",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md",
+        "docs/74_V2_CONTRACT_INVENTORY.md",
+        "scripts/validate_v2_scope.py",
+        "scripts/tests/v2-scope-unit-test.sh",
+        "specs/SPEC_VERSION.json",
+        "specs/orchestrator/gates.json",
+        ".github/workflows/ci.yml",
+        "internal/devorchestrator/dag.go",
+        "internal/devorchestrator/dag_v2_test.go"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md",
+        "docs/72_V2_CLAUDE_CODE_HANDOFF.md",
+        "docs/67_TEST_GATES.md",
+        "specs/orchestrator/gates.json"
+      ],
+      "supervisor_scope_narrowing": "Supervisor 自有任务：把 31 个工作包注册为正式 T 任务并建立受测的 v2_required 完成投影；本笔不实现任何产品功能，也不得把 planning JSON 当运行状态。迁移号不适用。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1302",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-01 真实 UI 验收框架",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-01",
+      "dependencies": [
+        "T1301",
+        "T1329",
+        "T1332"
+      ],
+      "requirements": [
+        "隔离真服务、browser 驱动、CI 作业、证据与反绕过规则；G23",
+        "只在 WEB-01 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "隔离真服务、browser 驱动、CI 作业、证据与反绕过规则；G23",
+        "WEB-01 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "登入可由 DOM 操作完成；故意断开一个主按钮后测试红；缺依赖、缺账号建立入口、未执行任一步均 fail"
+      ],
+      "tests": [
+        "browser journey logs in through the DOM and persists the session",
+        "removing a primary button handler turns the corresponding journey red",
+        "missing service/account entry point fails the run instead of skipping"
+      ],
+      "allowed_scope": [
+        "tests/web-v2/**",
+        "scripts/tests/**",
+        "Makefile"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/57_DEMO_UAT.md",
+        "docs/67_TEST_GATES.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "只交付可红可绿的 UI 驱动 harness 与一条初始可运行案例；.github/** 与 specs/orchestrator/gates.json 由 Supervisor 接线，Worker 不得写。测试不得使用 page.request/APIRequestContext/SQL/CLI 代做业务步骤。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1303",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-02 注册与首次工作台",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-02",
+      "dependencies": [
+        "T1302"
+      ],
+      "requirements": [
+        "G01/G02：既有注册重验、session、项目／待办入口、回到原任务",
+        "只在 WEB-02 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G01/G02：既有注册重验、session、项目／待办入口、回到原任务",
+        "WEB-02 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U01：新账号由网页注册，刷新后保持会话，首页可启动项目；错误密码与 session 失效有可恢复提示"
+      ],
+      "tests": [
+        "U01 signup, wrong-password error and session persistence are all exercised through the web UI",
+        "home exposes a create/continue-project entry after login",
+        "expired session offers a recoverable path"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(auth)/**",
+        "apps/web/app/(main)/page.tsx",
+        "apps/web/app/nav/**",
+        "apps/web/lib/auth.ts",
+        "apps/web/lib/auth.test.mjs",
+        "apps/web/lib/server-config.ts",
+        "cmd/api/authhttp/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/01_PRODUCT_VISION.md",
+        "docs/04_USERS_ROLES.md",
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/06_UI_UX_SPEC.md"
+      ],
+      "supervisor_scope_narrowing": "复用既有 /login signup 模式，不新建第二套认证。首页服务诊断移到管理位置；不得用 API 植入 session。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1304",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-03 团队与成员",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-03",
+      "dependencies": [
+        "T1303"
+      ],
+      "requirements": [
+        "G03：建立组织、邀请／加入、角色与离开",
+        "只在 WEB-03 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G03：建立组织、邀请／加入、角色与离开",
+        "WEB-03 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U02：A 建团队、B 由产品加入成 Contributor、Viewer 无法提升自己；变更角色后重载生效，历史贡献保留"
+      ],
+      "tests": [
+        "U02 creates an organization and invites B through the web UI",
+        "Viewer cannot promote itself and the refusal is visible",
+        "role change survives reload and keeps history"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/organizations/**",
+        "apps/web/lib/profile.ts",
+        "apps/web/lib/profile.test.mjs",
+        "cmd/api/orgshttp/**",
+        "internal/application/orgs/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/04_USERS_ROLES.md",
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md"
+      ],
+      "supervisor_scope_narrowing": "不新增公开组织目录；组织公开性只按既有允许内容呈现。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1305",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-04 建立项目与初始化",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-04",
+      "dependencies": [
+        "T1303"
+      ],
+      "requirements": [
+        "G04：个人／团队项目入口、purpose、默认 Public／可选 Private、空状态、初始研究路径；D16",
+        "只在 WEB-04 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G04：个人／团队项目入口、purpose、默认 Public／可选 Private、空状态、初始研究路径；D16",
+        "WEB-04 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U01/U02：建立页默认公开且可选私有，建两类项目各一次；若组织政策限制则说明原因；重复 slug 有字段错误且无重复项目；匿名不能看私有内容"
+      ],
+      "tests": [
+        "U01 creates one Public and one explicitly Private project from the web form",
+        "duplicate slug shows a field error and creates no second project",
+        "anonymous cannot see private project content or its existence"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/page.tsx",
+        "apps/web/app/(main)/projects/project-directory.tsx",
+        "apps/web/app/(main)/projects/project-badges.tsx",
+        "apps/web/app/(main)/projects/projects.css",
+        "apps/web/lib/projects.ts",
+        "apps/web/lib/projects.test.mjs",
+        "cmd/api/projectshttp/**",
+        "internal/application/projects/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/06_UI_UX_SPEC.md",
+        "docs/07_RSG_SPEC.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md"
+      ],
+      "supervisor_scope_narrowing": "D16：建立页默认 Public、可选 Private；不改变既有项目可见性。purpose 必填，空状态要给出第一条研究路径入口。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1306",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-05 科研对象浏览与版本",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-05",
+      "dependencies": [
+        "T1305"
+      ],
+      "requirements": [
+        "G06：对象详情、状态／版本选择、Research Map 与列表、关联导航",
+        "只在 WEB-05 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G06：对象详情、状态／版本选择、Research Map 与列表、关联导航",
+        "WEB-05 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U03：由项目点到指定 Question／Experiment／Finding 旧版再返回；无须贴 API URL 或识别码"
+      ],
+      "tests": [
+        "U03 reaches a Question, an Experiment and a Finding version by clicking, without pasting an API URL",
+        "old version and return path keep the selected object",
+        "research map and list agree on the object set"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/app/(main)/projects/[id]/page.tsx",
+        "apps/web/app/(main)/projects/[id]/tab-placeholder.tsx",
+        "apps/web/lib/entity-meta.ts",
+        "apps/web/lib/entity-meta.test.mjs",
+        "cmd/api/rsghttp/**",
+        "internal/application/sciobjects/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/06_UI_UX_SPEC.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "D14：科研内容为主入口。不得把页面做成文件树；legacy overview 卡片必须被可到达的对象详情替代或扩展。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1307",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-06 分支与结构化研究编辑",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-06",
+      "dependencies": [
+        "T1306"
+      ],
+      "requirements": [
+        "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查",
+        "只在 WEB-06 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查",
+        "WEB-06 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U03：少量信息可保存／重开草稿，逐步补全；至少主故事完整编辑 Question→Experiment/Calculation→Dataset→Claim/Finding；每类对象有独立表单验收；刷新／切 branch 后资料与版本正确"
+      ],
+      "tests": [
+        "U03 saves a minimal draft, leaves, reloads and continues it",
+        "the main story edits Question->Experiment/Calculation->Dataset->Claim/Finding",
+        "each of the 12 V1 object types has its own form acceptance"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/research-profile.ts",
+        "apps/web/lib/research-profile.test.mjs",
+        "cmd/api/rsghttp/**",
+        "internal/application/rsg/**",
+        "internal/rsg/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/07_RSG_SPEC.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "D15：先存草稿、逐步补全；送审/发布前检查完整性。12 类对象逐一验收，不允许单一 happy path 宣称全类型完成。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1308",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-07 Web 提交到 Git／RSG 一致",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-07",
+      "dependencies": [
+        "T1301",
+        "T1307"
+      ],
+      "requirements": [
+        "G07：调查并接通 provider refs、语义提交、失败状态、重试、reconciliation；必要 ADR",
+        "只在 WEB-07 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G07：调查并接通 provider refs、语义提交、失败状态、重试、reconciliation；必要 ADR",
+        "WEB-07 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U03/U05：由网页建立的研究变更能直接被 PR 合并；停掉 Git 服务时显示未完成／可重试，不能虚报成功；不需 CLI 补 commit"
+      ],
+      "tests": [
+        "a web-created research change becomes a provider ref that PR merge can consume without CLI git",
+        "stopping the Git service yields a visible incomplete/retryable state, never a false success",
+        "reconciliation refuses to report success when the provider write is missing"
+      ],
+      "allowed_scope": [
+        "internal/application/rsg/**",
+        "internal/application/diffs/**",
+        "internal/gitprovider/**",
+        "cmd/api/rsghttp/**",
+        "cmd/api/mergegit/**",
+        "cmd/api/refsync.go",
+        "tests/integration/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/16_GIT_COMPATIBILITY.md",
+        "docs/20_TECH_ARCHITECTURE.md"
+      ],
+      "supervisor_scope_narrowing": "G07 是技术关键路径：先按 WEB-00 的断点结论选定生产路径；需要 ADR 时由 Supervisor 先写，Worker 不得自行改架构。禁止以 mock Git、CLI push 或只断言 DB 成功收尾。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1309",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-08 项目计画、工作事项与研究记录",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-08",
+      "dependencies": [
+        "T1306",
+        "T1307"
+      ],
+      "requirements": [
+        "G22：使用者建立 Question 下的计画、执行记录、负责人／时间、观察、外部 run 连结、失败结果与交接",
+        "只在 WEB-08 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G22：使用者建立 Question 下的计画、执行记录、负责人／时间、观察、外部 run 连结、失败结果与交接",
+        "WEB-08 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U03：使用者建立计画→填写记录→补观察→关联输出→提交／交接；每项连到研究版本，无须模型生成或自动研究判断"
+      ],
+      "tests": [
+        "U03 creates a plan, records an execution, adds an observation, links an external run and hands off",
+        "a failed result can be recorded without being rewritten as success",
+        "every record points at a research version and needs no model-generated content"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/research-profile.ts",
+        "apps/web/lib/research-profile.test.mjs",
+        "cmd/api/rsghttp/**",
+        "cmd/api/discussionhttp/**",
+        "internal/application/sciobjects/**",
+        "internal/application/responsibilities/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "D13：使用者主动填写；不引入 AI 自动建记录。外部 run 只记录连结与结果，不启动计算或仪器。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1310",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-09 科研附件上传与下载",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-09",
+      "dependencies": [
+        "T1301",
+        "T1306"
+      ],
+      "requirements": [
+        "G21：从研究上下文上传、检查、附挂、版本与授权下载；公开项目新附件默认 Open／可选 Restricted，私有项目不开放；D17；同步 V2 上传契约",
+        "上传容量与分片沿用现有基线；资源限额单独配置并可见",
+        "公开新附件默认 Open/可选 Restricted；旧权限及使用权不被改写",
+        "只在 WEB-09 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G21：从研究上下文上传、检查、附挂、版本与授权下载；公开项目新附件默认 Open／可选 Restricted，私有项目不开放；D17；同步 V2 上传契约",
+        "WEB-09 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U04：公开项目新附件默认可由匿名下载，设为 Restricted 后无权者不可取回；私有与既有受限附件维持权限；修改附件留新版本；失败可重试"
+      ],
+      "tests": [
+        "U04 uploads from an Experiment context and an anonymous visitor downloads the default-Open attachment",
+        "Restricted and private attachments are refused to unauthorized sessions while the owner can retrieve them",
+        "interrupted upload retries, new version keeps old references, and the Files page stays read-only"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/files/**",
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/assets.test.mjs",
+        "apps/web/lib/assets.ts",
+        "apps/web/lib/files.test.mjs",
+        "apps/web/lib/files.ts",
+        "cmd/api/assetshttp/**",
+        "cmd/api/fileshttp/**",
+        "infra/migrations/00158_*.sql",
+        "internal/application/assetrights/**",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
+        "internal/storage/**",
+        "specs/SPEC_VERSION.json",
+        "specs/database/postgres.sql",
+        "tests/integration/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/17_FILES_STORAGE.md",
+        "docs/24_TEST_STRATEGY.md",
+        "docs/55_DATA_CLASSIFICATION.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "D17：公开项目新增附件默认 Open、可选 Restricted；私有项目与既有受限附件不改变。迁移号 00158 由 Supervisor 分配，必须同时重新生成 specs/database/postgres.sql 与 specs/SPEC_VERSION.json。上传容量沿用 docs/27 的 10GB/分片设计。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1311",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-10 Evidence 与 Provenance",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-10",
+      "dependencies": [
+        "T1307",
+        "T1310"
+      ],
+      "requirements": [
+        "G08：建立精确 assertion、固定来源版本、正反证据、scope、谱系与引用分开",
+        "只在 WEB-10 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G08：建立精确 assertion、固定来源版本、正反证据、scope、谱系与引用分开",
+        "WEB-10 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U03：由实验结果建立支持与反驳证据；回看 Claim 可打开原始记录与版本；普通引用不会显示成已验证证据"
+      ],
+      "tests": [
+        "U03 builds supporting and opposing assertions with a pinned source version and scope",
+        "a plain citation never renders as verified evidence",
+        "provenance is visually separate from the evidence graph"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "cmd/api/evidencehttp/**",
+        "cmd/api/provenancehttp/**",
+        "internal/application/evidencegraph/**",
+        "internal/application/evidencenetwork/**",
+        "internal/evidence/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/10_EVIDENCE_PROVENANCE.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "Citation != Dependency，Provenance Graph != Evidence Graph。不得生成 Truth Score；不得把相关性升级为因果。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1312",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-11 真实 Issues 与 Discussion",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-11",
+      "dependencies": [
+        "T1305",
+        "T1306"
+      ],
+      "requirements": [
+        "G09：移除正式项目的硬编码资料、建立／编辑工作事项、评论、与研究对象相连、提案式提升",
+        "只在 WEB-11 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G09：移除正式项目的硬编码资料、建立／编辑工作事项、评论、与研究对象相连、提案式提升",
+        "WEB-11 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U02/U03：A 建事项、B 回复并更新；两项目内容隔离；关闭 Issue 不自动解决 Research Question；提升经使用者确认"
+      ],
+      "tests": [
+        "U02 creates an issue, assigns B, B replies and changes state, and the second project stays isolated",
+        "closing an issue does not solve the linked research question",
+        "promotion to a research proposal requires an explicit user confirmation"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/issues/**",
+        "apps/web/lib/discussions.test.mjs",
+        "apps/web/lib/discussions.ts",
+        "cmd/api/discussionhttp/**",
+        "infra/migrations/00159_*.sql",
+        "internal/application/discussions/**",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
+        "specs/SPEC_VERSION.json",
+        "specs/database/postgres.sql",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "移除正式项目的硬编码 MOF Issue 数据。迁移号 00159；缺契约先在任务内补契约，不得用 fixture 冒充真实列表。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1313",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-12 PR 建立／送审／补件",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-12",
+      "dependencies": [
+        "T1308",
+        "T1311"
+      ],
+      "requirements": [
+        "G10：分支比较、提 PR、送审、退回与重送",
+        "只在 WEB-12 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G10：分支比较、提 PR、送审、退回与重送",
+        "WEB-12 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U05：B 从 branch 建 PR→送审→收到 changes requested→网页修改→重送；base/source/target 与新 diff 可见"
+      ],
+      "tests": [
+        "U05 creates a PR from a branch, requests review and receives changes requested",
+        "the resubmitted revision shows base/source/target and the new diff",
+        "stale reviews are invalidated by rule"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/pulls/**",
+        "apps/web/lib/pulls.ts",
+        "apps/web/lib/pulls.test.mjs",
+        "cmd/api/pullrequestshttp/**",
+        "internal/application/pullrequests/**",
+        "internal/application/prdiff/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "从分支页发起；base/source/target 必须可见。不得以 API 建 PR 代替网页步骤。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1314",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-13 Review 与冲突闭环",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-13",
+      "dependencies": [
+        "T1313"
+      ],
+      "requirements": [
+        "G10/G11：双维度评审、个人自审标记／团队独立评审策略、历史、PR 到冲突页的往返；D10",
+        "只在 WEB-13 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G10/G11：双维度评审、个人自审标记／团队独立评审策略、历史、PR 到冲突页的往返；D10",
+        "WEB-13 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U05：个人自审明确标注，团队独立评审由不同账户完成；未通过时原因可见；冲突由人处置，保存后重算 checks；旧批准失效规则正确"
+      ],
+      "tests": [
+        "U05 runs Scientific and Integrity review separately and records a human conflict resolution",
+        "a personal self-review is labelled as self-review, not independent verification",
+        "team independent-review policy cannot be satisfied by the author's own approval"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/conflicts/**",
+        "apps/web/app/(main)/projects/[id]/pulls/**",
+        "apps/web/lib/conflicts.ts",
+        "apps/web/lib/conflicts.test.mjs",
+        "apps/web/lib/pulls.ts",
+        "apps/web/lib/pulls.test.mjs",
+        "cmd/api/conflicthttp/**",
+        "cmd/api/reviewhttp/**",
+        "internal/application/reviews/**",
+        "internal/application/resolutions/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "D10：个人项目允许明确自审并合并；团队可要求独立评审；自审不伪装成独立验证。冲突由人处置，Agent 不判科学胜负。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1315",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-14 Merge 与主线治理",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-14",
+      "dependencies": [
+        "T1308",
+        "T1314"
+      ],
+      "requirements": [
+        "G10/G12：合并资格、检查、结果、Freeze、Abort/Reopen；支持 D10 个人自审合并，不绕过团队／组织策略",
+        "只在 WEB-14 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G10/G12：合并资格、检查、结果、Freeze、Abort/Reopen；支持 D10 个人自审合并，不绕过团队／组织策略",
+        "WEB-14 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U05：有权者点击合并后主线／PR 一致；个人合并保留 PR 和检查，团队未满独立评审要求不能合并；Abort/Reopen 留历史；无 main 直写捷径"
+      ],
+      "tests": [
+        "U05 merges from the web only when checks and review policy are satisfied",
+        "a team PR missing independent review shows a visible refusal",
+        "Abort/Reopen preserves history and does not delete the old version"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/pulls/**",
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/pulls.ts",
+        "apps/web/lib/pulls.test.mjs",
+        "apps/web/lib/projects.ts",
+        "apps/web/lib/projects.test.mjs",
+        "cmd/api/mergehttp/**",
+        "cmd/api/freezehttp/**",
+        "cmd/api/aborthttp/**",
+        "internal/application/merge/**",
+        "internal/application/mainfreeze/**",
+        "internal/application/aborts/**",
+        "internal/application/reopens/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/09_VERSION_CONTROL.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/43_STATE_MACHINES.md"
+      ],
+      "supervisor_scope_narrowing": "Merge controls acceptance, Publish controls visibility。禁止 main 直写捷径；重复点击不得重复接受或记贡献。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1316",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-15 Release／Milestones／导出",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-15",
+      "dependencies": [
+        "T1315"
+      ],
+      "requirements": [
+        "G13/G21：真实主线版本建立 Release、manifest／研究包下载、Milestone 连结",
+        "只在 WEB-15 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G13/G21：真实主线版本建立 Release、manifest／研究包下载、Milestone 连结",
+        "WEB-15 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U06：从网页合并结果建 Release；之后修改研究不改旧 Release；由页面导出可读包，版本、hash、policy pins 与附件清单一致"
+      ],
+      "tests": [
+        "U06 builds a Release from a merged state and later research does not mutate it",
+        "the exported research package matches version, Git SHA, blob hashes and policy pins",
+        "milestones are dated facts and never become scientific conclusions"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/releases/**",
+        "apps/web/app/(main)/projects/[id]/milestones/**",
+        "apps/web/lib/releases.ts",
+        "apps/web/lib/releases.test.mjs",
+        "apps/web/lib/milestones.ts",
+        "apps/web/lib/milestones.test.mjs",
+        "cmd/api/releasehttp/**",
+        "cmd/api/milestonehttp/**",
+        "internal/application/releases/**",
+        "internal/application/milestones/**",
+        "internal/application/manifests/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "Release/Asset Version immutable。Milestone 只记录日期事实。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1317",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-16 首次 Asset 发布",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-16",
+      "dependencies": [
+        "T1310",
+        "T1316"
+      ],
+      "requirements": [
+        "G14：由 accepted 对象／Release 选 candidate，四类 Asset、rights、影响预览、确认与结果",
+        "只在 WEB-16 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G14：由 accepted 对象／Release 选 candidate，四类 Asset、rights、影响预览、确认与结果",
+        "WEB-16 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U06：没有任何既存 Asset 时也能发布第一个 Dataset／Protocol；四类型逐一验收；取消不公开；成功页能导航到固定版本"
+      ],
+      "tests": [
+        "U06 publishes the first Asset from an accepted state with no pre-existing Asset",
+        "all four Asset types pass their own required-field acceptance",
+        "cancelling the confirmation publishes nothing"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/assets/**",
+        "apps/web/app/(main)/assets/**",
+        "apps/web/lib/assets.ts",
+        "apps/web/lib/assets.test.mjs",
+        "apps/web/lib/publish.ts",
+        "apps/web/lib/publish.test.mjs",
+        "cmd/api/assetshttp/**",
+        "internal/application/assetpublish/**",
+        "internal/application/assetmetadata/**",
+        "internal/application/assetrights/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "D17：blob access 与 rights 分开；Restricted->Open 需明确确认。四类型逐一验收；不得预建 Asset 证明首次发布。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1318",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-17 Knowledge 发布与阅读",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-17",
+      "dependencies": [
+        "T1311",
+        "T1315"
+      ],
+      "requirements": [
+        "G15：选 Claim/Finding 等版本、预览／确认、公开详情、Evidence 层次",
+        "只在 WEB-17 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G15：选 Claim/Finding 等版本、预览／确认、公开详情、Evidence 层次",
+        "WEB-17 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U07：A 发布某一版本；匿名由正常公开入口读到；不带出私有分支历史或未公开证据"
+      ],
+      "tests": [
+        "U07 publishes one Finding/Claim version and an anonymous visitor reads it from a public entry",
+        "private branch history and unpublished evidence do not leak",
+        "the published version is fixed after later edits"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/assets/**",
+        "apps/web/app/(main)/explore/**",
+        "apps/web/lib/assets.ts",
+        "apps/web/lib/assets.test.mjs",
+        "cmd/api/knowledgehttp/**",
+        "internal/application/knowledgepublish/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/10_EVIDENCE_PROVENANCE.md",
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "Knowledge visibility != Blob accessibility。只发布选定版本；attestation 发现面不扩大。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1319",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-18 Explore 与身份发现",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-18",
+      "dependencies": [
+        "T1317",
+        "T1318"
+      ],
+      "requirements": [
+        "G19/G15：可用的人／组织／知识连结与公开信息；以允许的公开内容作目录",
+        "只在 WEB-18 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G19/G15：可用的人／组织／知识连结与公开信息；以允许的公开内容作目录",
+        "WEB-18 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U07：访客由 Explore 找到本轮发布成果、作者及组织；不靠手填 pid/slug；受限制身份不被误列公开"
+      ],
+      "tests": [
+        "U07 finds the published result, its author and organization from Explore without typing an id",
+        "restricted identities are not listed publicly",
+        "People is no longer a ComingSoon dead end for public entities"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/explore/**",
+        "apps/web/app/(main)/people/**",
+        "apps/web/app/(main)/users/**",
+        "apps/web/app/(main)/organizations/**",
+        "apps/web/lib/explore.ts",
+        "apps/web/lib/explore.test.mjs",
+        "apps/web/lib/profile.ts",
+        "cmd/api/explorehttp/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/05_INFORMATION_ARCHITECTURE.md",
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "目录只列既有允许公开的实体；不得自行新增公开组织目录或扩大私有实体发现面。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1320",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-19 Search → Draft → Project",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-19",
+      "dependencies": [
+        "T1305",
+        "T1318"
+      ],
+      "requirements": [
+        "G16：来源选择、draft 预览与修订、确认、回到新项目",
+        "只在 WEB-19 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G16：来源选择、draft 预览与修订、确认、回到新项目",
+        "WEB-19 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U08：搜寻本轮发布知识→选来源→确认新项目；取消／重按不多建；引用固定版本；没有来源时不捏造内容"
+      ],
+      "tests": [
+        "U08 searches a result published in this round and sees its fixed version",
+        "cancel creates no project; confirm creates exactly one project and initial research state",
+        "no source yields an explicit limitation instead of fabricated content"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/search/**",
+        "apps/web/lib/search.ts",
+        "apps/web/lib/search.test.mjs",
+        "cmd/api/searchhttp/**",
+        "internal/application/researchcontext/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "引用固定版本；重复提交不多建项目；私有参考不得带入不允许的项目。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1321",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-20 重用／依赖／Fork／Derive",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-20",
+      "dependencies": [
+        "T1305",
+        "T1317"
+      ],
+      "requirements": [
+        "G17：上下文明确的动作与选择器、lineage 与依赖版本",
+        "只在 WEB-20 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G17：上下文明确的动作与选择器、lineage 与依赖版本",
+        "WEB-20 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U09：B 找到 A 的 Asset，分别建立 Reference／Dependency、Fork/Derive；页面清楚区分，引用仍指向原版"
+      ],
+      "tests": [
+        "U09 distinguishes Reference, Dependency, Fork and Derive on the page",
+        "a reference still points at the original fixed version",
+        "lineage and rights survive the reuse action"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/assets/**",
+        "apps/web/app/(main)/projects/[id]/assets/**",
+        "apps/web/lib/assets.ts",
+        "apps/web/lib/assets.test.mjs",
+        "cmd/api/forkshttp/**",
+        "internal/application/forks/**",
+        "internal/application/relations/**",
+        "internal/application/dependencyimpact/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/11_RELEASE_ASSET_HUB.md",
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "Citation != Dependency；四种语义不得合并成一个模糊按钮。引用指向原版，不改原版。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1322",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-21 外部贡献与贡献归属",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-21",
+      "dependencies": [
+        "T1315",
+        "T1318",
+        "T1321"
+      ],
+      "requirements": [
+        "G18：机会／外部 fork／Evidence 提案／跨项目 PR／评审／Profile",
+        "只在 WEB-21 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G18：机会／外部 fork／Evidence 提案／跨项目 PR／评审／Profile",
+        "WEB-21 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U09/U10：E 以非成员身份发现可做的工作并回传证据；A 从网页评审接受后双方可追溯；E 离开自己的组织不抹除个人贡献"
+      ],
+      "tests": [
+        "U09/U10 lets a non-member contribute external evidence through the web and A reviews it",
+        "origin/reviewed/unreviewed states are visible to both sides",
+        "an external contributor cannot write A's main"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/**",
+        "apps/web/app/(main)/users/**",
+        "apps/web/lib/assets.ts",
+        "apps/web/lib/assets.test.mjs",
+        "apps/web/lib/pulls.ts",
+        "apps/web/lib/pulls.test.mjs",
+        "apps/web/lib/profile.ts",
+        "cmd/api/forkshttp/**",
+        "cmd/api/knowledgehttp/**",
+        "internal/application/contribution/**",
+        "internal/application/credit/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/13_CONTRIBUTION_REPUTATION.md",
+        "docs/14_SEARCH_DISCOVERY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "外部贡献者不加入 A 的团队；贡献账本 append-only，credit 可纠错但留痕。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1323",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-22 Watch／Inbox／依赖影响",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-22",
+      "dependencies": [
+        "T1321",
+        "T1322"
+      ],
+      "requirements": [
+        "G20：订阅／退订、偏好、事件入口、上游变更提醒与处置",
+        "只在 WEB-22 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G20：订阅／退订、偏好、事件入口、上游变更提醒与处置",
+        "WEB-22 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U10：E 在页面 Watch；A 产生真实上游变更；E 收到可导航警报；不自动升级依赖或替人改结论；退订生效"
+      ],
+      "tests": [
+        "U10 watches from the page, receives a real upstream event, and navigates to the object/version",
+        "dependency impact is alerted but never auto-upgraded or auto-rewritten",
+        "unsubscribe stops later notifications"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/notifications/**",
+        "apps/web/lib/inbox.ts",
+        "apps/web/lib/inbox.test.mjs",
+        "apps/web/lib/profile.ts",
+        "cmd/api/subscriptionshttp/**",
+        "cmd/api/inboxhttp/**",
+        "cmd/api/feedshttp/**",
+        "internal/application/subscriptions/**",
+        "internal/application/inbox/**",
+        "internal/application/feeds/**",
+        "internal/application/notifications/**",
+        "internal/application/dependencyimpact/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/18_EVENTS_SUBSCRIPTIONS.md"
+      ],
+      "supervisor_scope_narrowing": "不自动升级依赖、不替人改 Claim；通知必须来自本轮真实事件，不只展示 seed。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1324",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-23 治理设定补全",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-23",
+      "dependencies": [
+        "T1304",
+        "T1315"
+      ],
+      "requirements": [
+        "G12：有效 policy、required review、member policy、审计；整体项目 visibility 保持已支持行为，不新增未批准的切换能力",
+        "只在 WEB-23 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G12：有效 policy、required review、member policy、审计；整体项目 visibility 保持已支持行为，不新增未批准的切换能力",
+        "WEB-23 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U11：有权者更改政策，低权限不可做；新 policy 影响后续行为而不改历史 Release；扩大可见性必须专页确认"
+      ],
+      "tests": [
+        "U11 changes policy/review requirements with the right role and refuses a lower role",
+        "a new policy affects later proposals while historical Release pins stay unchanged",
+        "visibility expansion is not silently offered outside the approved flow"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/projects.ts",
+        "apps/web/lib/projects.test.mjs",
+        "cmd/api/policyhttp/**",
+        "internal/application/policy/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/43_STATE_MACHINES.md"
+      ],
+      "supervisor_scope_narrowing": "整体项目 visibility 切换不列本轮新增能力；不得自行扩大公开范围。最后一位 Owner 不能被不当移除。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1325",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-24 全旅程可用性与修复",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-24",
+      "dependencies": [
+        "T1303",
+        "T1304",
+        "T1305",
+        "T1306",
+        "T1307",
+        "T1308",
+        "T1309",
+        "T1310",
+        "T1311",
+        "T1312",
+        "T1313",
+        "T1314",
+        "T1315",
+        "T1316",
+        "T1317",
+        "T1318",
+        "T1319",
+        "T1320",
+        "T1321",
+        "T1322",
+        "T1323",
+        "T1324",
+        "T1327",
+        "T1328"
+      ],
+      "requirements": [
+        "G23：loading/empty/error/permission、错误恢复、keyboard、必要手机阅读、中英文字",
+        "只在 WEB-24 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G23：loading/empty/error/permission、错误恢复、keyboard、必要手机阅读、中英文字",
+        "WEB-24 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U01–U14 每步可找到下一步、可重试／取消、不丢已填内容；核心 UI 无 placeholder 或没有说明的 disabled"
+      ],
+      "tests": [
+        "every U01-U13 step has a visible next step, retry/cancel path, and no unexplained disabled control",
+        "loading/empty/error/permission states keep entered content",
+        "keyboard and Chinese/English primary actions remain usable"
+      ],
+      "allowed_scope": [
+        "apps/web/**",
+        "packages/ui/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/06_UI_UX_SPEC.md",
+        "docs/28_ACCESSIBILITY_I18N.md",
+        "docs/51_FRONTEND_STANDARD.md"
+      ],
+      "supervisor_scope_narrowing": "跨旅程收口任务：按 WEB-02..23、26、27 的交付逐步接入；不得把 placeholder/ComingSoon 当已交付。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1326",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-25 正式 Web Master Gate",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-25",
+      "dependencies": [
+        "T1325",
+        "T1330",
+        "T1331"
+      ],
+      "requirements": [
+        "U01–U14、全新资料旅程、多账号、负向与故障恢复、CI＋人工走查",
+        "只在 WEB-25 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "U01–U14、全新资料旅程、多账号、负向与故障恢复、CI＋人工走查",
+        "WEB-25 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "全新命名空间一次走完并可重跑；每一步都有本次 trace／截图／版本；任何跳过、API 代行、CLI 补状态或未执行均不通过"
+      ],
+      "tests": [
+        "U01-U14 run from a fresh namespace in one pass and can be re-run",
+        "every step carries this run's trace/screenshot/build SHA",
+        "any skipped/API-substituted/CLI-assisted step fails the gate"
+      ],
+      "allowed_scope": [
+        "tests/web-v2/**",
+        "tests/acceptance/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/24_TEST_STRATEGY.md",
+        "docs/31_MASTER_ACCEPTANCE.md",
+        "docs/57_DEMO_UAT.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "最终 Web Master Gate：必须在全部必需任务合并后执行；不能以历史绿灯或 seed 代替。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1327",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-26 项目模板与自定义补充字段",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-26",
+      "dependencies": [
+        "T1304",
+        "T1307"
+      ],
+      "requirements": [
+        "G24：内置科研模板、项目字段配置、校验与模板版本、核心语义约束；D18",
+        "只增项目补充字段；核心版本/证据语义不能被模板绕开",
+        "只在 WEB-26 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G24：内置科研模板、项目字段配置、校验与模板版本、核心语义约束；D18",
+        "WEB-26 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U12：由网页增补字段，在记录与 PR 中使用；跨项目隔离；改模板不改历史记录／Release；无权者不能改模板，核心规则不可绕过"
+      ],
+      "tests": [
+        "U12 adds a project field, uses it in a record and sees it in the PR",
+        "another project is unaffected, and an unauthorized user cannot change the template",
+        "updating a template never rewrites historical records or Release meaning"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/research-profile.test.mjs",
+        "apps/web/lib/research-profile.ts",
+        "cmd/api/schemaprofileshttp/**",
+        "cmd/api/templateshttp/**",
+        "infra/migrations/00160_*.sql",
+        "internal/application/schemaprofiles/**",
+        "internal/application/templates/**",
+        "internal/persistence/**",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
+        "specs/SPEC_VERSION.json",
+        "specs/database/postgres.sql",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "D18：默认模板 + 项目补充字段；核心身份/版本/证据规则不可移除。迁移号 00160；模板变更迁移必须显式并留历史。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1328",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-27 数据预览、作图与基础分析",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-27",
+      "dependencies": [
+        "T1306",
+        "T1307",
+        "T1310"
+      ],
+      "requirements": [
+        "G25：通用文件预览／下载、数据列与范围选择、基础图表／统计／曲线拟合、处理／方法参数、显式保存与导出、来源与权限；具体首批清单写入任务包",
+        "必须同时交付预览与手动分析；保存来源版本/列/范围/方法/参数",
+        "分析结果和科学结论分开；不得引入未批准的模型外发",
+        "只在 WEB-27 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G25：通用文件预览／下载、数据列与范围选择、基础图表／统计／曲线拟合、处理／方法参数、显式保存与导出、来源与权限；具体首批清单写入任务包",
+        "WEB-27 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U13：由网页预览本轮上传数据，主动选列作图／统计／拟合；参考数据数值正确；结果可重开、导出、追溯原始版本；源数据不变，错误输入及越权被正确处理"
+      ],
+      "tests": [
+        "U13 previews text/Markdown/PDF/image/CSV and downloads the original",
+        "user-selected columns/ranges produce a chart, statistics and linear/quadratic fit with correct reference values",
+        "saved results keep source version, parameters and operator; bad input fails explicitly"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/assets/**",
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/assets.test.mjs",
+        "apps/web/lib/assets.ts",
+        "cmd/api/assetshttp/**",
+        "infra/migrations/00161_*.sql",
+        "internal/application/analysis/**",
+        "internal/persistence/queries/**",
+        "internal/persistence/sqlc/**",
+        "internal/storage/**",
+        "services/scientific-adapter/**",
+        "specs/SPEC_VERSION.json",
+        "specs/database/postgres.sql",
+        "tests/integration/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/27_PERFORMANCE_SLO.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md"
+      ],
+      "supervisor_scope_narrowing": "D06 A+B：预览与用户主动分析都交付。首批图表/统计/拟合清单见 docs/70 §11；不得把整个大文件无界读入内存。迁移号 00161；不新增未经批准的科研对象类型。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1329",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-28 Kimi 接入与持续监督预检",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-28",
+      "dependencies": [
+        "T1301",
+        "T1332"
+      ],
+      "requirements": [
+        "G27：实际模型、工具、结构化 RESULT、Worker/Reviewer 隔离、失败恢复、持续 Supervisor；drive 可选",
+        "实测 Read/Edit/Bash、结构化 RESULT、Review、恢复及模型身份",
+        "直接编排不依赖 drive；持续 Supervisor、单一调度权与预算/权限边界有效",
+        "证明常规 CI/Review 拒绝会进入修复而非无人处理的停点",
+        "只在 WEB-28 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G27：实际模型、工具、结构化 RESULT、Worker/Reviewer 隔离、失败恢复、持续 Supervisor；drive 可选",
+        "WEB-28 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "受控样例完成 spawn→collect→review→G2/G3/G4；受控失败可由 Supervisor 返工并恢复；模型身份与日志可核对，不能以 hello 成功替代"
+      ],
+      "tests": [
+        "a controlled Kimi worker spawn->collect->independent review->G2/G3/G4 completes the full chain",
+        "a fabricated/incomplete RESULT is rejected by collect",
+        "a controlled failure is reworked and recovered; the session resumes from disk state"
+      ],
+      "allowed_scope": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "tests/worker-*/**",
+        "ops/**",
+        "tasks/v2/kimi-precheck.json"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/61_DEVELOPMENT_ORCHESTRATION.md",
+        "docs/63_WORKER_CONTRACT.md",
+        "docs/72_V2_CLAUDE_CODE_HANDOFF.md"
+      ],
+      "supervisor_scope_narrowing": "Supervisor 预检任务：模型身份/工具/结构化 RESULT/隔离/Reviewer/恢复逐项实测；hello 或模型名显示不算通过。不得降低隔离或 collect 校验。若某模型特性不兼容，做最小受测适配并记录。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1330",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-29 团队试用部署包",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-29",
+      "dependencies": [
+        "T1303",
+        "T1305",
+        "T1308",
+        "T1310",
+        "T1315",
+        "T1316",
+        "T1317",
+        "T1318",
+        "T1320",
+        "T1321",
+        "T1322",
+        "T1323",
+        "T1324",
+        "T1327",
+        "T1328"
+      ],
+      "requirements": [
+        "G26：固定版本部署、配置说明、迁移、启动／停止／升级／回滚、示例与团队指南",
+        "团队试用交付不是公众 Beta；必要安全/限流/配置与运维能力仍要具备",
+        "只在 WEB-29 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G26：固定版本部署、配置说明、迁移、启动／停止／升级／回滚、示例与团队指南",
+        "WEB-29 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U14：干净 Ubuntu/WSL2 Linux 文件系统按 runbook 部署，网页显示正确构建版本，能完成全部已选功能；没有未说明的手工补库"
+      ],
+      "tests": [
+        "U14 installs a fixed version on a clean Ubuntu 24.04/WSL2 Linux filesystem and the web shows the build version",
+        "start/stop/upgrade/rollback steps work from the runbook",
+        "no undocumented manual database step is needed"
+      ],
+      "allowed_scope": [
+        "docker-compose.yml",
+        "infra/docker/**",
+        "ops/**",
+        "scripts/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/35_DEPLOYMENT_RUNBOOK.md",
+        "docs/36_RELEASE_RUNBOOK.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "supervisor_scope_narrowing": "运维准备可用 CLI；业务实体不得预注入。团队试用部署包要含配置示例、迁移、启动/停止/升级/回滚与已知限制。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1331",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-30 备份恢复与交付演练",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-30",
+      "dependencies": [
+        "T1330"
+      ],
+      "requirements": [
+        "G26：DB/Git/Blob/配置一致备份、空环境恢复、升级兼容、故障与恢复说明",
+        "空环境恢复后从网页核查本轮创建的真实数据、权限及文件 hash",
+        "只在 WEB-30 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
+        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+      ],
+      "deliverables": [
+        "G26：DB/Git/Blob/配置一致备份、空环境恢复、升级兼容、故障与恢复说明",
+        "WEB-30 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
+      ],
+      "acceptance_criteria": [
+        "U14：恢复本轮网页创建的项目、附件、Release、Asset 与分析；界面内容和下载 hash 正确，私有／受限权限保持；回滚应用不倒写数据库历史"
+      ],
+      "tests": [
+        "U14 backs up PostgreSQL/Gitea/Blob/config and restores into an empty environment",
+        "restored project/attachment/Release/Asset/analysis hashes match and permissions do not widen",
+        "rollback of the app does not rewrite database history"
+      ],
+      "allowed_scope": [
+        "cmd/api/backupdr/**",
+        "tests/acceptance/**",
+        "ops/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "其他 WORKER 的 worktree 与 .rddev/**",
+        "任何凭据/密钥",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/37_BACKUP_DR.md",
+        "docs/25_CICD_DEVOPS.md"
+      ],
+      "supervisor_scope_narrowing": "备份/恢复是运维动作，不代做业务步骤；不能手改生产 SQL。权限与 Restricted 状态必须保持。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+    },
+    {
+      "id": "T1332",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-00 契约盘点：路由/角色/动作清单与 G01–G27 证据、G07/首次发布/附件下载后端断点",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-00",
+      "dependencies": [
+        "T1301"
+      ],
+      "requirements": [
+        "锁定 c037256 基准与现有路由/角色/动作；逐格给出 G01–G27 的源码证据与结论状态。",
+        "先查 G07（Web 变更到 Git/RSG）、首次 Asset 发布、附件下载三条断链，明确由哪个后续 T 任务接通。",
+        "不把历史 V1 绿灯当成本轮证据；未找到入口的写‘缺失’，未验证的写‘未运行’。"
+      ],
+      "deliverables": [
+        "tasks/v2/contract-inventory.json",
+        "docs/74_V2_CONTRACT_INVENTORY.md"
+      ],
+      "acceptance_criteria": [
+        "每个承诺动作都有 UI 入口/服务契约/情境编号；缺口标为未通，不能用历史绿灯代填。"
+      ],
+      "tests": [
+        "contract inventory names every G01-G27 row with a source path, an action entry, and a verdict (missing/partial/source-present/uncertain)",
+        "G07, first Asset publish and attachment download each have a named backend breakpoint decision and an owning later task",
+        "no inventory row claims a UI step passed on the strength of an API/CLI/seed shortcut"
+      ],
+      "allowed_scope": [
+        "tasks/v2/**",
+        "docs/74_V2_CONTRACT_INVENTORY.md"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "specs/**",
+        "apps/**",
+        "cmd/**",
+        "internal/**",
+        "tests/**"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/70_WEB_OPERABILITY_V2_PLAN.md",
+        "docs/71_V2_PRODUCT_DISCOVERY.md",
+        "docs/72_V2_CLAUDE_CODE_HANDOFF.md",
+        "docs/42_PAGE_SPECS.md",
+        "docs/04_USERS_ROLES.md"
+      ],
+      "supervisor_scope_narrowing": "该切片只有 Supervisor 可写（tasks/** 与 docs/** 均为 Supervisor-only）：Worker 不得被派到本任务。产出为 tasks/v2/contract-inventory.json 与 docs/74 的证据矩阵；每条都要给出真实源路径或标为未找到，不能把历史绿灯当成本轮证据。"
     }
   ]
 }

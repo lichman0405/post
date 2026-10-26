@@ -2,6 +2,12 @@
 
 > 本文件只面向长期驻留的 **Supervisor Claude Code**。Worker 不得把本文件作为自己的完整任务上下文；Worker 由 `rddev` 生成最小任务包与专用规则。
 
+## 当前开发入口：V2 团队试用版（2026-10-26）
+
+开始 V2 工作时，先读根 `V2_CLAUDE_CODE_PROMPT.md` 与 `docs/70_WEB_OPERABILITY_V2_PLAN.md`、`docs/71_V2_PRODUCT_DISCOVERY.md`、`docs/72_V2_CLAUDE_CODE_HANDOFF.md`。Owner 的产品访谈已完成 4/4，已批准决定是 V2 的范围增量依据；旧 V1 完成声明不代表 V2 完成，也不能用 V1 曾不交付上传等历史范围否定已批准的 V2。
+
+保留 Supervisor＋独立完整 Worker，`rddev drive` 为可选项；由 Supervisor 直接编排子命令即可。Issue、分支、Commit、Push、PR、CI、Merge 和 G1–G4 均需完整。`tasks/v2/` 是待正式注册的交接清单，不是另一份运行状态。先按 docs/72 注册和校验，再实际派工，持续推进到 V2 工程交付或真正需要人工的阻塞。
+
 ## 1. 身份与唯一职责
 
 你是 POST（Platform for Open Science & Technology）项目唯一的软件研发 Supervisor。你的职责是：读取规格、维护任务 DAG、拆分任务、选择可并行任务、启动独立 Claude Code Worker、验收 Worker 产物、维护 Issue/Branch/Commit/PR/Merge/Release、保持架构一致性并推进 Master Acceptance Gate。
@@ -139,11 +145,14 @@ Supervisor 必须独立检查 diff、scope、acceptance criteria，并重新运�
   scope 校验强制"覆盖迁移目录者必须覆盖它"，写入方式只有重新生成。
   其余 `specs/**` 与 `docs/**` 仍为 Supervisor-only。
 
-## 8.2 无人值守推进（2026-09-13）
+## 8.2 无人值守推进（2026-10-26 更新）
 
 Supervisor **不因"一个任务/一个阶段/一轮对话结束了"而停止等待人工输入**。
-机械段（dispatch → 等待 → collect → review → accept → commit → push → PR → 等 CI → merge → 再 dispatch）
-由 `rddev drive` 驱动；**只有四类情形才停下来**：
+必须持续推进完整链路：Issue → Branch/Worktree → dispatch → 等待 → collect → review → accept → commit → push → PR → 等 CI → merge → 同步主线 → 再 dispatch。
+
+**Owner 已于 2026-10-26 明确取消 `rddev drive` 的硬性使用条件。** Supervisor 可直接编排既有 `rddev` 子命令，也可选择 `rddev drive` 处理机械步骤；后者是可选执行器，不是必需入口。选择直接编排无需再次请求批准。
+
+取消的仅是 `drive` 强绑定，不是 `rddev` 的任务、Worker 隔离、scope/HEAD 校验、状态恢复或 G1–G4 机制。Supervisor 必须保持长期判断与恢复循环，不能把工具退出当作任务完成。**只有四类情形才停止受影响路径并请求人工决定**：
 
 1. **L3**：产品、科研语义、安全、权限、隐私、法律或公开性决策；
 2. **重大 L2**：会改变既定核心架构原则；
@@ -186,3 +195,5 @@ GitHub/Primer 风格：中性背景、细边框、高信息密度、蓝色交互
 ## 12. 完成声明
 
 完成不是“所有 task 显示 done”。必须同时：所有 V1-required task merged、四层 Gate 通过、Master Acceptance 通过、MOF canonical workflow 从 Research Question 到 external contribution 全闭环通过，并有可复现证据。
+
+V2 使用 docs/70 与其正式注册任务／验收投影独立判定：所有必需工作包及子任务合并、U01–U14 真实网页操作全通过、四层 Gate、部署／升级／空环境恢复及运维交付齐全。不能把 V2 混进历史 V1 分母；未运行不记 passed；团队实际科研试用反馈与工程可部署状态分别记录。

@@ -1,0 +1,1756 @@
+{
+  "version": "1.0",
+  "date": "2026-10-26",
+  "base_commit": "c03725682e59f0c98fc4e2a09c77e481dda4e38c",
+  "kind": "handoff_plan_not_live_dag",
+  "live_sources": [
+    "tasks/tasks.json",
+    "tasks/task_status.json",
+    "tasks/tests.json"
+  ],
+  "model_requested": "kimi-k3.1-pro-highspeed",
+  "drive_required": false,
+  "agent_mode": "persistent_supervisor_and_independent_claude_code_workers",
+  "concurrency": {
+    "bootstrap_workers": 1,
+    "target_workers": 3,
+    "hard_max_workers": 4,
+    "reviews_share_capacity": true
+  },
+  "scope_rule": "既定产品范围已确认；任务注册/契约/技术细化由 Supervisor 执行，不重新访谈已经批准的方向。",
+  "tasks": [
+    {
+      "id": "WEB-00",
+      "title": "基准与契约盘点",
+      "priority": "P0",
+      "deliverable": "锁定 commit、路由／角色／动作清单、G01–G27 逐格证据；先查 G07、首次发布、附件下载的后端断点",
+      "acceptance_criteria": [
+        "每个承诺动作都有 UI 入口、服务契约、情境编号；缺口标为未通，不能用历史绿灯代填"
+      ],
+      "journey_ids": [],
+      "dependencies": [],
+      "milestone": "M0",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "docs/**",
+        "specs/**",
+        "tasks/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "锁定 commit、路由／角色／动作清单、G01–G27 逐格证据；先查 G07、首次发布、附件下载的后端断点",
+        "把规划编号映射为正式 T 任务；不得把清单误当运行状态",
+        "先同步批准的角色/公开规则、OpenAPI 和验收命令；在安全窗口再改指纹输入"
+      ],
+      "effort_hours_estimate": {
+        "low": 8,
+        "high": 16,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Supervisor",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-01",
+      "title": "真实 UI 验收框架",
+      "priority": "P0",
+      "deliverable": "隔离真服务、browser 驱动、CI 作业、证据与反绕过规则；G23",
+      "acceptance_criteria": [
+        "登入可由 DOM 操作完成；故意断开一个主按钮后测试红；缺依赖、缺账号建立入口、未执行任一步均 fail"
+      ],
+      "journey_ids": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14"
+      ],
+      "dependencies": [
+        "WEB-00",
+        "WEB-28"
+      ],
+      "milestone": "M0",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "tests/web-v2/**",
+        ".github/workflows/**",
+        "specs/orchestrator/gates.json"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "隔离真服务、browser 驱动、CI 作业、证据与反绕过规则；G23"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true,
+      "coverage_phase": "定义 harness 与场景入口；各旅程按功能切片实际接入，不要求首笔跑通未实现功能"
+    },
+    {
+      "id": "WEB-02",
+      "title": "注册与首次工作台",
+      "priority": "P0",
+      "deliverable": "G01/G02：既有注册重验、session、项目／待办入口、回到原任务",
+      "acceptance_criteria": [
+        "U01：新账号由网页注册，刷新后保持会话，首页可启动项目；错误密码与 session 失效有可恢复提示"
+      ],
+      "journey_ids": [
+        "U01"
+      ],
+      "dependencies": [
+        "WEB-01"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(auth)/**",
+        "apps/web/app/(main)/page.tsx",
+        "apps/web/app/nav/**",
+        "apps/web/lib/auth*"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G01/G02：既有注册重验、session、项目／待办入口、回到原任务"
+      ],
+      "effort_hours_estimate": {
+        "low": 6,
+        "high": 12,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-03",
+      "title": "团队与成员",
+      "priority": "P0",
+      "deliverable": "G03：建立组织、邀请／加入、角色与离开",
+      "acceptance_criteria": [
+        "U02：A 建团队、B 由产品加入成 Contributor、Viewer 无法提升自己；变更角色后重载生效，历史贡献保留"
+      ],
+      "journey_ids": [
+        "U02"
+      ],
+      "dependencies": [
+        "WEB-02"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/organizations/**",
+        "apps/web/lib/**",
+        "cmd/api/orgshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G03：建立组织、邀请／加入、角色与离开"
+      ],
+      "effort_hours_estimate": {
+        "low": 8,
+        "high": 16,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-04",
+      "title": "建立项目与初始化",
+      "priority": "P0",
+      "deliverable": "G04：个人／团队项目入口、purpose、默认 Public／可选 Private、空状态、初始研究路径；D16",
+      "acceptance_criteria": [
+        "U01/U02：建立页默认公开且可选私有，建两类项目各一次；若组织政策限制则说明原因；重复 slug 有字段错误且无重复项目；匿名不能看私有内容"
+      ],
+      "journey_ids": [
+        "U01",
+        "U02"
+      ],
+      "dependencies": [
+        "WEB-02"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/**",
+        "apps/web/lib/projects*",
+        "cmd/api/projectshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G04：个人／团队项目入口、purpose、默认 Public／可选 Private、空状态、初始研究路径；D16"
+      ],
+      "effort_hours_estimate": {
+        "low": 6,
+        "high": 12,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-05",
+      "title": "科研对象浏览与版本",
+      "priority": "P0",
+      "deliverable": "G06：对象详情、状态／版本选择、Research Map 与列表、关联导航",
+      "acceptance_criteria": [
+        "U03：由项目点到指定 Question／Experiment／Finding 旧版再返回；无须贴 API URL 或识别码"
+      ],
+      "journey_ids": [
+        "U03"
+      ],
+      "dependencies": [
+        "WEB-04"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/**",
+        "cmd/api/rsghttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G06：对象详情、状态／版本选择、Research Map 与列表、关联导航"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-06",
+      "title": "分支与结构化研究编辑",
+      "priority": "P0",
+      "deliverable": "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查",
+      "acceptance_criteria": [
+        "U03：少量信息可保存／重开草稿，逐步补全；至少主故事完整编辑 Question→Experiment/Calculation→Dataset→Claim/Finding；每类对象有独立表单验收；刷新／切 branch 后资料与版本正确"
+      ],
+      "journey_ids": [
+        "U03"
+      ],
+      "dependencies": [
+        "WEB-05"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/**",
+        "cmd/api/rsghttp/**",
+        "internal/application/rsg/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查"
+      ],
+      "effort_hours_estimate": {
+        "low": 20,
+        "high": 40,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-07",
+      "title": "Web 提交到 Git／RSG 一致",
+      "priority": "P0",
+      "deliverable": "G07：调查并接通 provider refs、语义提交、失败状态、重试、reconciliation；必要 ADR",
+      "acceptance_criteria": [
+        "U03/U05：由网页建立的研究变更能直接被 PR 合并；停掉 Git 服务时显示未完成／可重试，不能虚报成功；不需 CLI 补 commit"
+      ],
+      "journey_ids": [
+        "U03",
+        "U05"
+      ],
+      "dependencies": [
+        "WEB-00",
+        "WEB-06"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "internal/application/**",
+        "internal/gitprovider/**",
+        "cmd/api/rsghttp/**",
+        "tests/integration/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G07：调查并接通 provider refs、语义提交、失败状态、重试、reconciliation；必要 ADR"
+      ],
+      "effort_hours_estimate": {
+        "low": 16,
+        "high": 40,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-08",
+      "title": "项目计画、工作事项与研究记录",
+      "priority": "P0",
+      "deliverable": "G22：使用者建立 Question 下的计画、执行记录、负责人／时间、观察、外部 run 连结、失败结果与交接",
+      "acceptance_criteria": [
+        "U03：使用者建立计画→填写记录→补观察→关联输出→提交／交接；每项连到研究版本，无须模型生成或自动研究判断"
+      ],
+      "journey_ids": [
+        "U03"
+      ],
+      "dependencies": [
+        "WEB-05",
+        "WEB-06"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/**",
+        "apps/web/lib/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G22：使用者建立 Question 下的计画、执行记录、负责人／时间、观察、外部 run 连结、失败结果与交接"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-09",
+      "title": "科研附件上传与下载",
+      "priority": "P0",
+      "deliverable": "G21：从研究上下文上传、检查、附挂、版本与授权下载；公开项目新附件默认 Open／可选 Restricted，私有项目不开放；D17；同步 V2 上传契约",
+      "acceptance_criteria": [
+        "U04：公开项目新附件默认可由匿名下载，设为 Restricted 后无权者不可取回；私有与既有受限附件维持权限；修改附件留新版本；失败可重试"
+      ],
+      "journey_ids": [
+        "U04"
+      ],
+      "dependencies": [
+        "WEB-00",
+        "WEB-05"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/**",
+        "internal/application/**",
+        "internal/blob/**",
+        "tests/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G21：从研究上下文上传、检查、附挂、版本与授权下载；公开项目新附件默认 Open／可选 Restricted，私有项目不开放；D17；同步 V2 上传契约",
+        "上传容量与分片沿用现有基线；资源限额单独配置并可见",
+        "公开新附件默认 Open/可选 Restricted；旧权限及使用权不被改写"
+      ],
+      "effort_hours_estimate": {
+        "low": 20,
+        "high": 44,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-10",
+      "title": "Evidence 与 Provenance",
+      "priority": "P0",
+      "deliverable": "G08：建立精确 assertion、固定来源版本、正反证据、scope、谱系与引用分开",
+      "acceptance_criteria": [
+        "U03：由实验结果建立支持与反驳证据；回看 Claim 可打开原始记录与版本；普通引用不会显示成已验证证据"
+      ],
+      "journey_ids": [
+        "U03"
+      ],
+      "dependencies": [
+        "WEB-06",
+        "WEB-09"
+      ],
+      "milestone": "M1",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/evidencehttp/**",
+        "cmd/api/provenancehttp/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G08：建立精确 assertion、固定来源版本、正反证据、scope、谱系与引用分开"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-11",
+      "title": "真实 Issues 与 Discussion",
+      "priority": "P0",
+      "deliverable": "G09：移除正式项目的硬编码资料、建立／编辑工作事项、评论、与研究对象相连、提案式提升",
+      "acceptance_criteria": [
+        "U02/U03：A 建事项、B 回复并更新；两项目内容隔离；关闭 Issue 不自动解决 Research Question；提升经使用者确认"
+      ],
+      "journey_ids": [
+        "U02",
+        "U03"
+      ],
+      "dependencies": [
+        "WEB-04",
+        "WEB-05"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/discussionhttp/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G09：移除正式项目的硬编码资料、建立／编辑工作事项、评论、与研究对象相连、提案式提升"
+      ],
+      "effort_hours_estimate": {
+        "low": 8,
+        "high": 16,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-12",
+      "title": "PR 建立／送审／补件",
+      "priority": "P0",
+      "deliverable": "G10：分支比较、提 PR、送审、退回与重送",
+      "acceptance_criteria": [
+        "U05：B 从 branch 建 PR→送审→收到 changes requested→网页修改→重送；base/source/target 与新 diff 可见"
+      ],
+      "journey_ids": [
+        "U05"
+      ],
+      "dependencies": [
+        "WEB-07",
+        "WEB-10"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/pulls/**",
+        "apps/web/lib/pulls*",
+        "cmd/api/pullrequestshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G10：分支比较、提 PR、送审、退回与重送"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-13",
+      "title": "Review 与冲突闭环",
+      "priority": "P0",
+      "deliverable": "G10/G11：双维度评审、个人自审标记／团队独立评审策略、历史、PR 到冲突页的往返；D10",
+      "acceptance_criteria": [
+        "U05：个人自审明确标注，团队独立评审由不同账户完成；未通过时原因可见；冲突由人处置，保存后重算 checks；旧批准失效规则正确"
+      ],
+      "journey_ids": [
+        "U05"
+      ],
+      "dependencies": [
+        "WEB-12"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/conflicts/**",
+        "apps/web/app/(main)/projects/[id]/pulls/**",
+        "apps/web/lib/**",
+        "cmd/api/reviewhttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G10/G11：双维度评审、个人自审标记／团队独立评审策略、历史、PR 到冲突页的往返；D10"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-14",
+      "title": "Merge 与主线治理",
+      "priority": "P0",
+      "deliverable": "G10/G12：合并资格、检查、结果、Freeze、Abort/Reopen；支持 D10 个人自审合并，不绕过团队／组织策略",
+      "acceptance_criteria": [
+        "U05：有权者点击合并后主线／PR 一致；个人合并保留 PR 和检查，团队未满独立评审要求不能合并；Abort/Reopen 留历史；无 main 直写捷径"
+      ],
+      "journey_ids": [
+        "U05"
+      ],
+      "dependencies": [
+        "WEB-13",
+        "WEB-07"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/**",
+        "apps/web/lib/**",
+        "cmd/api/mergehttp/**",
+        "cmd/api/freezehttp/**",
+        "cmd/api/aborthttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G10/G12：合并资格、检查、结果、Freeze、Abort/Reopen；支持 D10 个人自审合并，不绕过团队／组织策略"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-15",
+      "title": "Release／Milestones／导出",
+      "priority": "P0",
+      "deliverable": "G13/G21：真实主线版本建立 Release、manifest／研究包下载、Milestone 连结",
+      "acceptance_criteria": [
+        "U06：从网页合并结果建 Release；之后修改研究不改旧 Release；由页面导出可读包，版本、hash、policy pins 与附件清单一致"
+      ],
+      "journey_ids": [
+        "U06"
+      ],
+      "dependencies": [
+        "WEB-14"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/releases/**",
+        "apps/web/lib/releases*",
+        "cmd/api/releaseshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G13/G21：真实主线版本建立 Release、manifest／研究包下载、Milestone 连结"
+      ],
+      "effort_hours_estimate": {
+        "low": 8,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-16",
+      "title": "首次 Asset 发布",
+      "priority": "P0",
+      "deliverable": "G14：由 accepted 对象／Release 选 candidate，四类 Asset、rights、影响预览、确认与结果",
+      "acceptance_criteria": [
+        "U06：没有任何既存 Asset 时也能发布第一个 Dataset／Protocol；四类型逐一验收；取消不公开；成功页能导航到固定版本"
+      ],
+      "journey_ids": [
+        "U06"
+      ],
+      "dependencies": [
+        "WEB-15",
+        "WEB-09"
+      ],
+      "milestone": "M2",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/assets/**",
+        "apps/web/lib/publish*",
+        "cmd/api/assetshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G14：由 accepted 对象／Release 选 candidate，四类 Asset、rights、影响预览、确认与结果"
+      ],
+      "effort_hours_estimate": {
+        "low": 18,
+        "high": 36,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-17",
+      "title": "Knowledge 发布与阅读",
+      "priority": "P1",
+      "deliverable": "G15：选 Claim/Finding 等版本、预览／确认、公开详情、Evidence 层次",
+      "acceptance_criteria": [
+        "U07：A 发布某一版本；匿名由正常公开入口读到；不带出私有分支历史或未公开证据"
+      ],
+      "journey_ids": [
+        "U07"
+      ],
+      "dependencies": [
+        "WEB-14",
+        "WEB-10"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/knowledgehttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G15：选 Claim/Finding 等版本、预览／确认、公开详情、Evidence 层次"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-18",
+      "title": "Explore 与身份发现",
+      "priority": "P1",
+      "deliverable": "G19/G15：可用的人／组织／知识连结与公开信息；以允许的公开内容作目录",
+      "acceptance_criteria": [
+        "U07：访客由 Explore 找到本轮发布成果、作者及组织；不靠手填 pid/slug；受限制身份不被误列公开"
+      ],
+      "journey_ids": [
+        "U07"
+      ],
+      "dependencies": [
+        "WEB-16",
+        "WEB-17"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/explore/**",
+        "apps/web/app/(main)/people/**",
+        "apps/web/app/(main)/users/**",
+        "apps/web/app/(main)/organizations/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G19/G15：可用的人／组织／知识连结与公开信息；以允许的公开内容作目录"
+      ],
+      "effort_hours_estimate": {
+        "low": 8,
+        "high": 16,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-19",
+      "title": "Search → Draft → Project",
+      "priority": "P1",
+      "deliverable": "G16：来源选择、draft 预览与修订、确认、回到新项目",
+      "acceptance_criteria": [
+        "U08：搜寻本轮发布知识→选来源→确认新项目；取消／重按不多建；引用固定版本；没有来源时不捏造内容"
+      ],
+      "journey_ids": [
+        "U08"
+      ],
+      "dependencies": [
+        "WEB-04",
+        "WEB-17"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/search/**",
+        "apps/web/lib/search*",
+        "cmd/api/searchhttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G16：来源选择、draft 预览与修订、确认、回到新项目"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-20",
+      "title": "重用／依赖／Fork／Derive",
+      "priority": "P1",
+      "deliverable": "G17：上下文明确的动作与选择器、lineage 与依赖版本",
+      "acceptance_criteria": [
+        "U09：B 找到 A 的 Asset，分别建立 Reference／Dependency、Fork/Derive；页面清楚区分，引用仍指向原版"
+      ],
+      "journey_ids": [
+        "U09"
+      ],
+      "dependencies": [
+        "WEB-16",
+        "WEB-04"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/assetshttp/**",
+        "cmd/api/forkshttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G17：上下文明确的动作与选择器、lineage 与依赖版本"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-21",
+      "title": "外部贡献与贡献归属",
+      "priority": "P1",
+      "deliverable": "G18：机会／外部 fork／Evidence 提案／跨项目 PR／评审／Profile",
+      "acceptance_criteria": [
+        "U09/U10：E 以非成员身份发现可做的工作并回传证据；A 从网页评审接受后双方可追溯；E 离开自己的组织不抹除个人贡献"
+      ],
+      "journey_ids": [
+        "U09",
+        "U10"
+      ],
+      "dependencies": [
+        "WEB-17",
+        "WEB-20",
+        "WEB-14"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/forkshttp/**",
+        "cmd/api/knowledgehttp/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G18：机会／外部 fork／Evidence 提案／跨项目 PR／评审／Profile"
+      ],
+      "effort_hours_estimate": {
+        "low": 18,
+        "high": 36,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-22",
+      "title": "Watch／Inbox／依赖影响",
+      "priority": "P1",
+      "deliverable": "G20：订阅／退订、偏好、事件入口、上游变更提醒与处置",
+      "acceptance_criteria": [
+        "U10：E 在页面 Watch；A 产生真实上游变更；E 收到可导航警报；不自动升级依赖或替人改结论；退订生效"
+      ],
+      "journey_ids": [
+        "U10"
+      ],
+      "dependencies": [
+        "WEB-20",
+        "WEB-21"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/subscriptionshttp/**",
+        "cmd/api/inboxhttp/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G20：订阅／退订、偏好、事件入口、上游变更提醒与处置"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 20,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-23",
+      "title": "治理设定补全",
+      "priority": "P1",
+      "deliverable": "G12：有效 policy、required review、member policy、审计；整体项目 visibility 保持已支持行为，不新增未批准的切换能力",
+      "acceptance_criteria": [
+        "U11：有权者更改政策，低权限不可做；新 policy 影响后续行为而不改历史 Release；扩大可见性必须专页确认"
+      ],
+      "journey_ids": [
+        "U11"
+      ],
+      "dependencies": [
+        "WEB-03",
+        "WEB-14"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/**",
+        "cmd/api/policyhttp/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G12：有效 policy、required review、member policy、审计；整体项目 visibility 保持已支持行为，不新增未批准的切换能力"
+      ],
+      "effort_hours_estimate": {
+        "low": 10,
+        "high": 24,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-24",
+      "title": "全旅程可用性与修复",
+      "priority": "P0",
+      "deliverable": "G23：loading/empty/error/permission、错误恢复、keyboard、必要手机阅读、中英文字",
+      "acceptance_criteria": [
+        "U01–U14 每步可找到下一步、可重试／取消、不丢已填内容；核心 UI 无 placeholder 或没有说明的 disabled"
+      ],
+      "journey_ids": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13"
+      ],
+      "dependencies": [
+        "WEB-02",
+        "WEB-03",
+        "WEB-04",
+        "WEB-05",
+        "WEB-06",
+        "WEB-07",
+        "WEB-08",
+        "WEB-09",
+        "WEB-10",
+        "WEB-11",
+        "WEB-12",
+        "WEB-13",
+        "WEB-14",
+        "WEB-15",
+        "WEB-16",
+        "WEB-17",
+        "WEB-18",
+        "WEB-19",
+        "WEB-20",
+        "WEB-21",
+        "WEB-22",
+        "WEB-23",
+        "WEB-26",
+        "WEB-27"
+      ],
+      "milestone": "M4",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "packages/ui/**",
+        "tests/web-v2/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G23：loading/empty/error/permission、错误恢复、keyboard、必要手机阅读、中英文字"
+      ],
+      "effort_hours_estimate": {
+        "low": 16,
+        "high": 32,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-25",
+      "title": "正式 Web Master Gate",
+      "priority": "P0",
+      "deliverable": "U01–U14、全新资料旅程、多账号、负向与故障恢复、CI＋人工走查",
+      "acceptance_criteria": [
+        "全新命名空间一次走完并可重跑；每一步都有本次 trace／截图／版本；任何跳过、API 代行、CLI 补状态或未执行均不通过"
+      ],
+      "journey_ids": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "U06",
+        "U07",
+        "U08",
+        "U09",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14"
+      ],
+      "dependencies": [
+        "WEB-24",
+        "WEB-29",
+        "WEB-30"
+      ],
+      "milestone": "M4",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "tests/web-v2/**",
+        "tests/acceptance/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "U01–U14、全新资料旅程、多账号、负向与故障恢复、CI＋人工走查"
+      ],
+      "effort_hours_estimate": {
+        "low": 16,
+        "high": 32,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-26",
+      "title": "项目模板与自定义补充字段",
+      "priority": "P1",
+      "deliverable": "G24：内置科研模板、项目字段配置、校验与模板版本、核心语义约束；D18",
+      "acceptance_criteria": [
+        "U12：由网页增补字段，在记录与 PR 中使用；跨项目隔离；改模板不改历史记录／Release；无权者不能改模板，核心规则不可绕过"
+      ],
+      "journey_ids": [
+        "U12"
+      ],
+      "dependencies": [
+        "WEB-03",
+        "WEB-06"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "cmd/api/**",
+        "internal/application/**",
+        "internal/persistence/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G24：内置科研模板、项目字段配置、校验与模板版本、核心语义约束；D18",
+        "只增项目补充字段；核心版本/证据语义不能被模板绕开"
+      ],
+      "effort_hours_estimate": {
+        "low": 16,
+        "high": 32,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-27",
+      "title": "数据预览、作图与基础分析",
+      "priority": "P1",
+      "deliverable": "G25：通用文件预览／下载、数据列与范围选择、基础图表／统计／曲线拟合、处理／方法参数、显式保存与导出、来源与权限；具体首批清单写入任务包",
+      "acceptance_criteria": [
+        "U13：由网页预览本轮上传数据，主动选列作图／统计／拟合；参考数据数值正确；结果可重开、导出、追溯原始版本；源数据不变，错误输入及越权被正确处理"
+      ],
+      "journey_ids": [
+        "U13"
+      ],
+      "dependencies": [
+        "WEB-05",
+        "WEB-06",
+        "WEB-09"
+      ],
+      "milestone": "M3",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "apps/web/**",
+        "services/scientific-adapter/**",
+        "cmd/api/**",
+        "internal/application/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G25：通用文件预览／下载、数据列与范围选择、基础图表／统计／曲线拟合、处理／方法参数、显式保存与导出、来源与权限；具体首批清单写入任务包",
+        "必须同时交付预览与手动分析；保存来源版本/列/范围/方法/参数",
+        "分析结果和科学结论分开；不得引入未批准的模型外发"
+      ],
+      "effort_hours_estimate": {
+        "low": 24,
+        "high": 56,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-28",
+      "title": "Kimi 接入与持续监督预检",
+      "priority": "P0",
+      "deliverable": "G27：实际模型、工具、结构化 RESULT、Worker/Reviewer 隔离、失败恢复、持续 Supervisor；drive 可选",
+      "acceptance_criteria": [
+        "受控样例完成 spawn→collect→review→G2/G3/G4；受控失败可由 Supervisor 返工并恢复；模型身份与日志可核对，不能以 hello 成功替代"
+      ],
+      "journey_ids": [],
+      "dependencies": [
+        "WEB-00"
+      ],
+      "milestone": "M0",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "cmd/rddev/**",
+        "internal/devorchestrator/**",
+        "tests/worker-*/**",
+        "ops/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G27：实际模型、工具、结构化 RESULT、Worker/Reviewer 隔离、失败恢复、持续 Supervisor；drive 可选",
+        "实测 Read/Edit/Bash、结构化 RESULT、Review、恢复及模型身份",
+        "直接编排不依赖 drive；持续 Supervisor、单一调度权与预算/权限边界有效",
+        "证明常规 CI/Review 拒绝会进入修复而非无人处理的停点"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 28,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-29",
+      "title": "团队试用部署包",
+      "priority": "P1",
+      "deliverable": "G26：固定版本部署、配置说明、迁移、启动／停止／升级／回滚、示例与团队指南",
+      "acceptance_criteria": [
+        "U14：干净 Ubuntu/WSL2 Linux 文件系统按 runbook 部署，网页显示正确构建版本，能完成全部已选功能；没有未说明的手工补库"
+      ],
+      "journey_ids": [
+        "U14"
+      ],
+      "dependencies": [
+        "WEB-02",
+        "WEB-04",
+        "WEB-07",
+        "WEB-09",
+        "WEB-14",
+        "WEB-15",
+        "WEB-16",
+        "WEB-17",
+        "WEB-19",
+        "WEB-20",
+        "WEB-21",
+        "WEB-22",
+        "WEB-23",
+        "WEB-26",
+        "WEB-27"
+      ],
+      "milestone": "M4",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "ops/**",
+        "infra/**",
+        "scripts/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G26：固定版本部署、配置说明、迁移、启动／停止／升级／回滚、示例与团队指南",
+        "团队试用交付不是公众 Beta；必要安全/限流/配置与运维能力仍要具备"
+      ],
+      "effort_hours_estimate": {
+        "low": 16,
+        "high": 32,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    },
+    {
+      "id": "WEB-30",
+      "title": "备份恢复与交付演练",
+      "priority": "P1",
+      "deliverable": "G26：DB/Git/Blob/配置一致备份、空环境恢复、升级兼容、故障与恢复说明",
+      "acceptance_criteria": [
+        "U14：恢复本轮网页创建的项目、附件、Release、Asset 与分析；界面内容和下载 hash 正确，私有／受限权限保持；回滚应用不倒写数据库历史"
+      ],
+      "journey_ids": [
+        "U14"
+      ],
+      "dependencies": [
+        "WEB-29"
+      ],
+      "milestone": "M4",
+      "required_for_v2": true,
+      "initial_status": "not_started",
+      "implementation_scope_hints": [
+        "cmd/api/backupdr/**",
+        "tests/acceptance/**",
+        "ops/**"
+      ],
+      "scope_warning": "仅调查提示；Supervisor 先核对实际路径并收窄，不能直接用作 Worker allowed_scope。docs/specs/tasks/CI 与生成物按角色和契约单独处理。",
+      "requirements": [
+        "G26：DB/Git/Blob/配置一致备份、空环境恢复、升级兼容、故障与恢复说明",
+        "空环境恢复后从网页核查本轮创建的真实数据、权限及文件 hash"
+      ],
+      "effort_hours_estimate": {
+        "low": 12,
+        "high": 28,
+        "basis": "规划经验，非 Kimi 本仓库实测；不等同人工工时"
+      },
+      "formalization_owner": "Supervisor",
+      "implementation_owner": "Independent Claude Code Worker",
+      "git_delivery": {
+        "issue": true,
+        "branch": true,
+        "commit": true,
+        "push": true,
+        "pull_request": true,
+        "ci": true,
+        "merge": true,
+        "actor": "Supervisor"
+      },
+      "required_checks": [
+        "G1",
+        "G2",
+        "G3（相关真服务/UI）",
+        "G4"
+      ],
+      "test_command_policy": "正式派工前写入已存在或明确交付的精确命令及失败标准；不能以本段文字代替运行命令。",
+      "independent_review_required": true
+    }
+  ]
+}
