@@ -6,13 +6,25 @@
 # be trusted if it fails when the product control it claims to use stops
 # working. So this script:
 #
-#   1. disconnects the primary submit button's handler in the REAL login card
+#   1. snapshots the target file's CURRENT bytes;
+#   2. disconnects the primary submit button's handler in the REAL login card
 #      (the form's onSubmit no longer calls submit(); the button remains
 #      present, visible, enabled and clickable — only its effect is gone);
-#   2. runs the real harness and requires the journey to FAIL on the step
+#   3. runs the real harness and requires the journey to FAIL on the step
 #      that needs the button, with the reason naming the primary button;
-#   3. restores the source in a trap (also on INT/TERM), verifies the exact
-#      anchor is back, and requires a clean run to PASS.
+#   4. restores the exact snapshot in a trap (also on INT/TERM), verifies the
+#      bytes are identical to what was there before, and requires a clean run
+#      to PASS.
+#
+# WHY IT SNAPSHOTS INSTEAD OF REQUIRING A CLEAN GIT TREE
+# -----------------------------------------------------
+# This check runs on the G2 integration/task tree, where the task's diff is
+# deliberately UNCOMMITTED (Workers may not commit). Refusing a dirty target
+# would make the required job red on every Worker branch for a property the
+# proof does not depend on: what matters is that the tree is byte-identical
+# after the restore, not that it matched HEAD before the run. So the proof is
+# anchored to a snapshot of the current bytes; it refuses only when that
+# snapshot cannot be taken (or the mutation anchor itself is not present).
 #
 # The mutation leaves the button in the DOM on purpose: a removed element
 # would be caught by a selector search, which proves less than a button that
@@ -30,18 +42,21 @@ TARGET="$ROOT/apps/web/app/(auth)/login/login-card.tsx"
 ORIGINAL='          void submit();'
 MUTATED='          /* WEB-01 mutation-check: the primary submit handler is disconnected on purpose */'
 RUN_ROOT="${WEB_V2_MUTATION_EVIDENCE:-$V2_DIR/evidence/mutation-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+SNAPSHOT="$RUN_ROOT/target-snapshot.bak"
 
 needle_count() { # file needle
   grep -cF -- "$2" "$1" 2>/dev/null || true
 }
 
+sha_of() { # file
+  sha256sum "$1" | awk '{print $1}'
+}
+
+snapshot_taken=0
 restore() {
-  if [ ! -f "$TARGET" ]; then
-    return
-  fi
-  if [ "$(needle_count "$TARGET" "$MUTATED")" -gt 0 ]; then
-    MUTATED="$MUTATED" ORIGINAL="$ORIGINAL" perl -0pi -e 's/\Q$ENV{MUTATED}\E/$ENV{ORIGINAL}/' "$TARGET"
-    echo "mutation-check: restored $TARGET" >&2
+  if [ "$snapshot_taken" = 1 ] && [ -f "$SNAPSHOT" ]; then
+    cp "$SNAPSHOT" "$TARGET"
+    echo "mutation-check: restored $TARGET from the pre-run snapshot" >&2
   fi
 }
 # The product source is mutated while this runs; an interrupted run must not
@@ -55,10 +70,17 @@ fail() {
 
 [ -f "$TARGET" ] || fail "$TARGET does not exist; the mutation anchor has moved"
 [ "$(needle_count "$TARGET" "$ORIGINAL")" -eq 1 ] || fail "expected exactly one primary-handler anchor in $TARGET (found $(needle_count "$TARGET" "$ORIGINAL")); update this script's anchor rather than skipping the proof"
-[ "$(needle_count "$TARGET" "$MUTATED")" -eq 0 ] || fail "$TARGET already carries the mutation; refusing to draw a conclusion from a dirty tree"
-git -C "$ROOT" diff --quiet -- "$TARGET" || fail "$TARGET has uncommitted changes before the check; restore it first"
+[ "$(needle_count "$TARGET" "$MUTATED")" -eq 0 ] || fail "$TARGET already carries the mutation (a previous interrupted run left it mutated); restore it before running the proof"
 
 mkdir -p "$RUN_ROOT"
+
+echo "== mutation-check: snapshotting the target's current bytes =="
+cp "$TARGET" "$SNAPSHOT" || fail "could not snapshot $TARGET; without a snapshot the mutation cannot be undone, so the proof is refused"
+snapshot_taken=1
+SNAPSHOT_SHA="$(sha_of "$SNAPSHOT")"
+[ -s "$SNAPSHOT" ] || fail "the snapshot $SNAPSHOT is empty; refusing to mutate a file it cannot restore"
+[ "$(sha_of "$TARGET")" = "$SNAPSHOT_SHA" ] || fail "the snapshot does not byte-match the target it was just taken from"
+echo "mutation-check: snapshot sha256=$SNAPSHOT_SHA (a dirty target is expected and allowed)"
 
 echo "== mutation-check: arming — disconnecting the primary submit handler =="
 MUTATED="$MUTATED" ORIGINAL="$ORIGINAL" perl -0pi -e 's/\Q$ENV{ORIGINAL}\E/$ENV{MUTATED}/' "$TARGET"
@@ -86,11 +108,10 @@ if ! grep -q "sign-up: primary button did not reach a signed-in home page" <<<"$
 fi
 echo "mutation-check: the journey caught the disconnected primary button for the expected reason"
 
-echo "== mutation-check: restoring the handler =="
+echo "== mutation-check: restoring the snapshot =="
 restore
-[ "$(needle_count "$TARGET" "$ORIGINAL")" -eq 1 ] || fail "the revert did not take; $TARGET is left mutated"
 [ "$(needle_count "$TARGET" "$MUTATED")" -eq 0 ] || fail "the mutated anchor is still present after the revert"
-git -C "$ROOT" diff --quiet -- "$TARGET" || fail "the revert left $TARGET different from its baseline"
+[ "$(sha_of "$TARGET")" = "$SNAPSHOT_SHA" ] || fail "the restored target does not byte-match the pre-run snapshot (expected $SNAPSHOT_SHA, found $(sha_of "$TARGET"))"
 
 echo "== mutation-check: restored run (expect PASS) =="
 set +e
@@ -108,6 +129,8 @@ cat > "$RUN_ROOT/mutation-check.json" <<EOF
 {
   "check": "primary submit handler disconnected -> journey red; restored -> green",
   "target": "apps/web/app/(auth)/login/login-card.tsx",
+  "dirty_target_allowed": true,
+  "snapshot_sha256": "$SNAPSHOT_SHA",
   "mutated_run_exit": $mutated_status,
   "restored_run_exit": $restored_status,
   "observed_failure": "sign-up: primary button did not reach a signed-in home page",
@@ -116,4 +139,4 @@ cat > "$RUN_ROOT/mutation-check.json" <<EOF
 }
 EOF
 
-echo "mutation-check: PASSED — the mutated tree was red for the button, the restored tree was green (evidence: $RUN_ROOT)"
+echo "mutation-check: PASSED — the mutated tree was red for the button, the restored tree was green and byte-identical to the pre-run snapshot (evidence: $RUN_ROOT)"

@@ -17,9 +17,11 @@
 #   1. the static anti-bypass scan over every journey/helper module;
 #   2. the entry-point pre-flight (sign-in form + account-establishment
 #      entry) — missing entry fails, it never skips;
-#   3. the browser journey: sign up through the DOM, session survives a
-#      reload and a second page, sign out, sign in through the DOM, session
-#      survives another reload.
+#   3. the browser journey: sign up through the DOM, the signed-in home's
+#      project entry works, the session survives a reload and a second page,
+#      sign out, a wrong password is reported recoverably, signing in from
+#      another page returns to it, the session survives another reload, and
+#      a session ended elsewhere offers a recoverable sign-in prompt.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.

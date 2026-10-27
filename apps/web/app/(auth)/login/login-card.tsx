@@ -10,6 +10,7 @@ import {
   createAuthClient,
   messageForCode,
   messageForOIDCError,
+  safeNextPath,
   type AuthClient,
 } from "../../../lib/auth";
 import { useT } from "../../i18n-provider";
@@ -27,7 +28,16 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
   const t = useT();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  // T1303: where to go after a successful sign-in. Only an internal path is
+  // honoured (safeNextPath), so a link cannot turn the sign-in form into an
+  // open redirect. A visitor with no destination lands on the home page.
+  const nextPath = safeNextPath(searchParams.get("next"));
+  // `?mode=signup` opens the same card in create-account mode, so the home
+  // page's "create an account" entry lands on the form the visitor needs.
+  // It is the SAME /login surface — not a second authentication system.
+  const [mode, setMode] = useState<"login" | "signup">(
+    searchParams.get("mode") === "signup" ? "signup" : "login",
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,7 +70,8 @@ export function LoginCard({ apiBaseUrl }: { apiBaseUrl: string }) {
       } else {
         await client.signup({ email: email.trim(), password });
       }
-      router.push("/");
+      // Back to the task the reader was on (T1303); "/" when none was given.
+      router.push(nextPath);
       router.refresh();
     } catch (err) {
       fail(err);

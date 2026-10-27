@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ActionList, ActionMenu } from "@primer/react";
 import { PersonIcon, TriangleDownIcon } from "@primer/octicons-react";
 
+import { loginHref } from "../../lib/auth";
 import { useT } from "../i18n-provider";
 import { useNavSession } from "./nav-session";
 
@@ -11,9 +13,15 @@ import { useNavSession } from "./nav-session";
  * The header's account area (client): a "Sign in" link when there is no
  * session, and a handle + caret menu with profile / sign-out when there is.
  * The session comes from the shared NavSessionProvider — no fetch here.
+ *
+ * T1303: the signed-out link carries the reader's current path as `?next=`,
+ * so signing in from a page returns them to that page instead of dropping
+ * every visitor on the home page. On the sign-in surface itself the path is
+ * discarded by loginHref (returning to /login after signing in is a loop).
  */
 export function NavUserArea() {
   const { user, loading, busy, signOut } = useNavSession();
+  const pathname = usePathname();
   const t = useT();
 
   if (loading) {
@@ -24,7 +32,7 @@ export function NavUserArea() {
 
   if (user === null) {
     return (
-      <Link href="/login" className="global-nav-signin">
+      <Link href={loginHref(pathname)} className="global-nav-signin">
         {t("nav.signIn")}
       </Link>
     );

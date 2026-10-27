@@ -230,11 +230,95 @@ export function createAuthClient(
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * "Return to the task you were on" (T1303 / WEB-02)
+ * ------------------------------------------------------------------ */
+
+/** Where a successful sign-in goes when no usable `next` was supplied. */
+export const DEFAULT_NEXT_PATH = "/";
+
+/**
+ * safeNextPath: the post-sign-in destination carried in `?next=`.
+ *
+ * The value is attacker-influenceable (it is a URL a user can type or a link
+ * can carry), so only an internal absolute path is ever honoured:
+ *
+ *   - it must start with exactly one "/" — "//evil.example" and
+ *     "/\evil.example" are protocol-relative URLs that would leave the
+ *     site, and a backslash is treated as a slash by browsers;
+ *   - no control characters (a CR/LF would split a header downstream);
+ *   - the sign-in surface itself is not a destination: bouncing back to
+ *     /login after a successful sign-in is a loop, not a return.
+ *
+ * Anything else falls back to the home page. The check is deliberately
+ * allow-list-shaped rather than a sanitizer: a value that is not clearly a
+ * site-relative path is not "cleaned up", it is discarded.
+ */
+export function safeNextPath(raw: string | null | undefined): string {
+  if (typeof raw !== "string" || raw === "") return DEFAULT_NEXT_PATH;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return DEFAULT_NEXT_PATH;
+  if (raw.includes("\\")) return DEFAULT_NEXT_PATH;
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return DEFAULT_NEXT_PATH;
+  // Compare the NORMALIZED pathname, not the raw string: the browser resolves
+  // dot segments ("/projects/../login" and "/%2e%2e/login" both become
+  // "/login") and drops the query/fragment, so `next=/login%23x` arrives as
+  // "/login#x" and "/a/../login" arrives looking like a project page. All of
+  // them would land the reader back on the sign-in surface — a loop, not a
+  // return to a task. The URL parser is the same normalizer the address bar
+  // uses, so this cannot disagree with where the browser would actually go.
+  // The ORIGINAL string is returned when it is safe: normalizing it would
+  // rewrite the reader's query string, and the pathname is what was checked.
+  let pathname: string;
+  try {
+    pathname = new URL(raw, "http://post.invalid").pathname;
+  } catch {
+    return DEFAULT_NEXT_PATH;
+  }
+  if (pathname === "/login" || pathname.startsWith("/login/")) return DEFAULT_NEXT_PATH;
+  return raw;
+}
+
+/**
+ * The sign-in URL that returns the visitor to `next` once they are signed
+ * in. The value is validated here, not by the caller, so a page cannot
+ * build an open redirect by passing a raw string through.
+ */
+export function loginHref(next?: string | null): string {
+  const target = safeNextPath(next);
+  if (target === DEFAULT_NEXT_PATH) return "/login";
+  return `/login?next=${encodeURIComponent(target)}`;
+}
+
+/** The sign-up URL: the same /login surface, opened in its create-account
+ *  mode, so a first-time visitor lands on the form they need rather than on
+ *  a sign-in form with a toggle to find (T1303). */
+export function signupHref(next?: string | null): string {
+  return `${loginHref(next)}${loginHref(next).includes("?") ? "&" : "?"}mode=signup`;
+}
+
+/**
+ * The recoverable sentence shown when a session this tab had is no longer
+ * accepted by the API.
+ *
+ * A 401 from GET /auth/session is the same answer for "expired" and
+ * "revoked elsewhere", so the wording covers both rather than claiming to
+ * know which happened. It is a refusal-path sentence, which is where
+ * lib/auth.ts already keeps its messages (messageForCode); the ordinary
+ * page copy comes from the catalog.
+ */
+export function sessionEndedNotice(): string {
+  return "Your session has ended — it may have expired, or it may have been signed out in another tab. Sign in again to return to this page.";
+}
+
 /** Human-facing message for a stable API code (login/signup errors). */
 export function messageForCode(code: string): string {
   switch (code) {
     case "AUTH_INVALID_CREDENTIALS":
       return "Invalid email or password.";
+    case "UNAUTHENTICATED":
+      // The guard's answer to an anonymous state-changing request — on a
+      // page that already had a session this means the session ended.
+      return sessionEndedNotice();
     case "EMAIL_ALREADY_REGISTERED":
       return "An account with this email already exists.";
     case "VALIDATION_FAILED":

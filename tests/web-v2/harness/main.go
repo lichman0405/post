@@ -12,9 +12,11 @@
 //     that pre-created it through HTTP or SQL would make the login journey
 //     prove nothing (docs/70 §6.2).
 //   - it seeds no projects, membership or other business state.
-//   - it serves only the auth surface plus /healthz and /readyz. The journey
-//     in this task is U01's login/session slice; later journey slices mount
-//     their own product surfaces here as the features land.
+//   - it serves the auth surface, the project read surface and /healthz +
+//     /readyz. T1303 (WEB-02) needs the home workbench to list the signed-in
+//     account's projects, so the production project API is mounted over the
+//     same real database; later journey slices mount their own product
+//     surfaces here as the features land.
 //
 // Isolation: every run creates its own database `webv2_<task>_<run id>`,
 // migrates it, and drops it on exit. Redis sessions are issued random
@@ -53,7 +55,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/authz"
 	"github.com/lichman0405/post/internal/persistence"
 )
 
@@ -266,6 +270,23 @@ func run(ctx context.Context, cfg config) error {
 
 	mux := http.NewServeMux()
 	authAPI.Register(mux)
+
+	// The project surface (WEB-02's home lists the account's projects; the
+	// journey also follows the work entry into /projects). Composed exactly
+	// as cmd/api composes it — pgx ProjectStore, pgx OrgStore as the
+	// organization gate, the production policy matrix — with no provisioning
+	// queue: this harness has no worker, and the create path's job enqueue is
+	// optional by design (the project row is the source of truth and the API's
+	// startup sweep back-fills a missing queue).
+	orgStore := persistence.NewOrgStore(pool)
+	projectAPI := projectshttp.New(projectshttp.Deps{
+		Store: persistence.NewProjectStore(pool),
+		Orgs:  orgStore,
+		Authz: authz.NewMatrixEngine(),
+	})
+	mux.Handle("/api/v1/projects", projectAPI.Routes())
+	mux.Handle("/api/v1/projects/", projectAPI.Routes())
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"service": "post-api",
