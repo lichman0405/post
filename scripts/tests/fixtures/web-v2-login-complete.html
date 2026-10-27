@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>fixture: complete login page</title></head>
+  <body>
+    <!--
+      Negative-case fixture for scripts/tests/web-v2-unit-test.sh. It has the
+      shape entrypoint-check.mjs requires: the sign-in form, the primary
+      submit control, and the account-establishment entry. It is NOT the
+      product; the product page is exercised only by tests/web-v2/run.sh.
+    -->
+    <main>
+      <div class="auth-card">
+        <h1>Sign in to POST</h1>
+        <form>
+          <label for="email">Email</label>
+          <input id="email" type="email" />
+          <label for="password">Password</label>
+          <input id="password" type="password" />
+          <button type="submit" class="auth-submit">Sign in</button>
+        </form>
+        <p class="auth-sub auth-sub-after">
+          New to POST? <button type="button">Create an account</button>
+        </p>
+      </div>
+    </main>
+  </body>
+</html>

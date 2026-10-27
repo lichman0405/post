@@ -1,0 +1,4 @@
+# Harness runtime state, never part of the diff.
+node_modules/
+server.log
+evidence/

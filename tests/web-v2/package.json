@@ -1,0 +1,15 @@
+{
+  "name": "@post/web-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WEB-01 real-UI acceptance harness (G23): an isolated real PostgreSQL/Redis/API/Next stack driven by Chromium through the product's visible controls only. Accounts are established by the browser; no test-side request, SQL, CLI or storage write performs a business step.",
+  "type": "module",
+  "scripts": {
+    "journey": "node journey.mjs",
+    "entrypoint-check": "node entrypoint-check.mjs",
+    "test": "node --test lib/steps.test.mjs lib/evidence.test.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
