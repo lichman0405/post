@@ -44,6 +44,16 @@
   都不算 WEB-28 通过。
 - **可逆性**：可逆；仅使用既有账号。
 
+## L1-20261027-1 — web-v2 成为第 12 个 required CI job
+
+- **决策**：WEB-01 的 harness 合并后，把 `web-v2` 加入 `.github/workflows/ci.yml`、
+  `specs/orchestrator/gates.json` 的 `required_jobs`/G2/G4 与 `gate_spec_test.go` 的固定名单，
+  成为第 12 个 required job。三个 step 分别跑 `make web-v2`、`make web-v2-mutation`、`make web-v2-unit`，
+  带真实 PostgreSQL + Redis service。
+- **原因**：harness 若不在 required set，红的 UI 旅程不能阻止 merge；这正是 WEB-01 的交付要求。
+- **证据**：main 首次运行 run 40440719057 的 `web-v2` job `success`；gate_spec 同步测试通过。
+- **可逆性**：可逆；移除时四处一起改。
+
 ## L3-20261026-5 — V2 Worker 模型（owner 裁定）
 
 - **决策**：本轮 V2 Worker 使用当前已授权的 **deepseek-flash**；不再强求

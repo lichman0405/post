@@ -44,8 +44,13 @@
         "U13",
         "U14"
       ],
-      "issue": null,
-      "pull_requests": []
+      "issue": 389,
+      "pull_requests": [
+        390
+      ],
+      "task_issues": {
+        "T1302": 389
+      }
     },
     {
       "web": "WEB-02",
