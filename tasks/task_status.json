@@ -12810,9 +12810,12 @@
       "notes": "Issue #389; PR #390. WEB-01 harness merged; web-v2 wired as required job #12 and green on main (run 40440719057)."
     },
     "T1303": {
-      "status": "running",
-      "started_at": "2026-10-27T05:05:54Z",
-      "worker_run_id": "run-b00417af83323955",
+      "status": "merged",
+      "started_at": "2026-10-27T06:47:17Z",
+      "worker_run_id": "run-35ff0edfbbab8d80",
+      "accepted_by_supervisor_at": "2026-10-27T08:19:53Z",
+      "merged_at": "2026-10-27T08:34:02Z",
+      "rejection_reason": "Second review of this worktree: request_changes. The code is close; the\nevidence is not. Fix these, then re-run the real commands and rewrite RESULT\nfrom the outputs.\n\n1) BLOCKING — RESULT cites commands that do not exist:\n   `bash scripts/tests/a11y.sh` and `bash scripts/tests/i18n-smoke.sh`.\n   The real entry points are `make a11y` / `bash tests/web-smoke/run-a11y.sh`\n   and `make i18n` / `bash tests/web-smoke/run-i18n.sh`. Record the exact\n   command you ran and its real output; if a first run failed and a later run\n   passed, record both.\n\n2) BLOCKING — do not claim axe coverage the tree does not have. The a11y route\n   table (tests/web-smoke, outside allowed_scope) contains neither `/status`\n   nor `?mode=signup`. Either add coverage inside your scope (tests/web-v2) or\n   narrow RESULT and add a follow-up for WEB-24; zero claims without evidence.\n\n3) MAJOR — signup deep link: the journey signs up from plain /login via the\n   in-card toggle; `?mode=signup` is never exercised. Either add a step that\n   opens it and signs up, or narrow the claim.\n\n4) MAJOR — session-ended link: code renders loginHref(\"/\") with no next param.\n   Do not claim it carried ?next=; either implement the carry or state the\n   measured behaviour.\n\n5) MAJOR — home \"start a project\": creation is WEB-04. Acceptance must say\n   \"the home exposes the entry; creation is WEB-04\", not that a project can be\n   started.\n\n6) MAJOR — journey assertion: `.project-list-empty` is also the error container\n   (project-directory.tsx:64), so a 401/network failure passes. Key on the\n   success/empty marker or the response status, and assert the error container\n   is absent.\n\n7) MINOR — safeNextPath dot segments: '/projects/../login' passes. Normalize\n   the pathname before the /login and // checks; add negative cases to\n   auth.test.mjs.\n\n8) MINOR — i18n hard-coded scan does not cover the two new files; narrow the\n   coverage comment/claim, and add sessionEndedNotice to the catalog or record\n   the follow-up honestly.\n\n9) NIT — dead `home-page` class, 'status render' log on the workbench, and\n   docstrings claiming inbox/待办 coverage. Fix or narrow.\n\nStay inside allowed_scope. Re-run `make a11y`, `make i18n`, `make web-v2`,\n`make web-v2-mutation`, `make web-v2-unit`, `make observability-smoke`,\nweb typecheck/lint/unit and sast-node; put the exact commands/outputs in RESULT.\n",
       "history": [
         {
           "from": "todo",
@@ -12846,14 +12849,144 @@
           "at": "2026-10-27T05:05:54Z",
           "run_id": "run-b00417af83323955",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-27T05:20:54Z",
+          "run_id": "run-90cf3f259f38c144",
+          "reason": "collect rejected: scope: 1 changed path(s) outside allowed_scope [apps/web/app/(auth)/** apps/web/app/(main)/page.tsx apps/web/app/nav/** apps/web/lib/auth.ts apps/web/lib/auth.test.mjs apps/web/lib/server-config.ts cmd/api/authhttp/** tests/web-v2/**]: apps/web/app/(main)/layout.tsx"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T05:21:23Z",
+          "run_id": "run-9096cca5c24c5099",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-10-27T05:21:39Z",
+          "run_id": "run-26081656bfc4aa6d",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-10-27T05:21:49Z",
+          "run_id": "run-3f00d84ab44c3ca8"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-27T05:21:57Z",
+          "run_id": "run-86b32b0ea94ae83f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T05:35:12Z",
+          "run_id": "run-6054f206d6522b9d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-27T06:11:40Z",
+          "run_id": "run-8d84d694888c459c",
+          "reason": "G2 red on three in-scope items; fix them and keep everything else intact.\n(TestGitAuthIntegration passed standalone on main — that one is not yours.)\n\n1) sast-node — apps/web/app/(auth)/status/page.tsx:85\n   `checks[n]?.status` is flagged as security/detect-object-injection. Use a\n   safe lookup (Object.entries / a Map / an explicit allow-list) and re-run\n   `bash tests/security/sast.sh node` -> 0 unbaselined.\n\n2) observability regression — tests/observability/trace-e2e.sh phase 4 fetches\n   `/` with `X-Correlation-ID: web-trace-0001` and requires the id in the HTML.\n   Your new home dropped lib/correlation; restore the server-side resolution:\n   resolve once per render, send the header on the server-side API calls, and\n   render the id in the HTML (e.g. a hidden data-correlation-id marker) without\n   exposing anything private. Re-run `make observability-smoke`.\n\n3) web-v2-mutation on a task diff — the required G2 job runs on the integration\n   tree where your diff is uncommitted; mutation-check refuses a dirty target,\n   so the required job fails on every worker branch. Change it to snapshot the\n   current bytes, apply the mutation, run the journey, restore the snapshot and\n   verify byte-equality (refuse only if the snapshot itself cannot be taken).\n   A dirty target must be allowed; the restored tree must be exactly what it\n   was. Re-run `make web-v2-mutation`.\n\n4) RESULT wording — the home entry only navigates to /projects; project\n   creation is WEB-04. Narrow the summary/acceptance sentence to what the\n   journey measured.\n\nAlso fix the `?next=/login%23x` nit in safeNextPath if cheap.\nStay inside the task scope; exact commands and outputs in RESULT.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T06:11:44Z",
+          "run_id": "run-b76f0242d0ebbbb5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T06:37:53Z",
+          "run_id": "run-e7eff55ede5a7692",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-27T06:47:17Z",
+          "run_id": "run-37a0c1a30d440547",
+          "reason": "Second review of this worktree: request_changes. The code is close; the\nevidence is not. Fix these, then re-run the real commands and rewrite RESULT\nfrom the outputs.\n\n1) BLOCKING — RESULT cites commands that do not exist:\n   `bash scripts/tests/a11y.sh` and `bash scripts/tests/i18n-smoke.sh`.\n   The real entry points are `make a11y` / `bash tests/web-smoke/run-a11y.sh`\n   and `make i18n` / `bash tests/web-smoke/run-i18n.sh`. Record the exact\n   command you ran and its real output; if a first run failed and a later run\n   passed, record both.\n\n2) BLOCKING — do not claim axe coverage the tree does not have. The a11y route\n   table (tests/web-smoke, outside allowed_scope) contains neither `/status`\n   nor `?mode=signup`. Either add coverage inside your scope (tests/web-v2) or\n   narrow RESULT and add a follow-up for WEB-24; zero claims without evidence.\n\n3) MAJOR — signup deep link: the journey signs up from plain /login via the\n   in-card toggle; `?mode=signup` is never exercised. Either add a step that\n   opens it and signs up, or narrow the claim.\n\n4) MAJOR — session-ended link: code renders loginHref(\"/\") with no next param.\n   Do not claim it carried ?next=; either implement the carry or state the\n   measured behaviour.\n\n5) MAJOR — home \"start a project\": creation is WEB-04. Acceptance must say\n   \"the home exposes the entry; creation is WEB-04\", not that a project can be\n   started.\n\n6) MAJOR — journey assertion: `.project-list-empty` is also the error container\n   (project-directory.tsx:64), so a 401/network failure passes. Key on the\n   success/empty marker or the response status, and assert the error container\n   is absent.\n\n7) MINOR — safeNextPath dot segments: '/projects/../login' passes. Normalize\n   the pathname before the /login and // checks; add negative cases to\n   auth.test.mjs.\n\n8) MINOR — i18n hard-coded scan does not cover the two new files; narrow the\n   coverage comment/claim, and add sessionEndedNotice to the catalog or record\n   the follow-up honestly.\n\n9) NIT — dead `home-page` class, 'status render' log on the workbench, and\n   docstrings claiming inbox/待办 coverage. Fix or narrow.\n\nStay inside allowed_scope. Re-run `make a11y`, `make i18n`, `make web-v2`,\n`make web-v2-mutation`, `make web-v2-unit`, `make observability-smoke`,\nweb typecheck/lint/unit and sast-node; put the exact commands/outputs in RESULT.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T06:47:17Z",
+          "run_id": "run-35ff0edfbbab8d80",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T07:39:00Z",
+          "run_id": "run-900a657a192bcf4b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-27T08:19:53Z",
+          "run_id": "run-a8efecac20e45215"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-27T08:34:02Z",
+          "run_id": "run-f86afebb980ec5c2",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1304": {
-      "status": "todo"
+      "status": "running",
+      "started_at": "2026-10-27T08:34:14Z",
+      "worker_run_id": "run-8bd5e454ecd7d6c4",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-27T08:34:10Z",
+          "run_id": "run-0decc85329561ad3"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-27T08:34:14Z",
+          "run_id": "run-8bd5e454ecd7d6c4",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1305": {
-      "status": "todo"
+      "status": "running",
+      "started_at": "2026-10-27T08:34:16Z",
+      "worker_run_id": "run-045024adcaa83739",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-27T08:34:14Z",
+          "run_id": "run-b9c410975fa49ca5"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-27T08:34:16Z",
+          "run_id": "run-045024adcaa83739",
+          "reason": "worker spawn"
+        }
+      ]
     },
     "T1306": {
       "status": "todo"
