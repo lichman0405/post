@@ -47,6 +47,7 @@ BROWSER_E2E_NO_DB_SUITES := $(filter-out $(BROWSER_E2E_DB_SUITES),$(BROWSER_E2E_
 	progress ci migrate search-rebuild search-embed infra-up infra-init infra infra-down infra-ps infra-logs \
 	security-tools security-gate \
 	browser-list browser-smoke browser-smoke-% browser-e2e browser-e2e-nodb browser-e2e-db browser-e2e-% browser-suites browser-ok-arity a11y i18n \
+	web-v2 web-v2-mutation web-v2-unit \
 	observability-smoke observability-trace observability-route
 
 help: ## list targets
@@ -446,6 +447,22 @@ a11y: ## run the full a11y suite: dynamic docs/42 pages scanned with real fixtur
 
 i18n: ## run the full i18n suite: language switching + wire identity, real fixture data
 	bash tests/web-smoke/run-i18n.sh
+
+# WEB-01 / G23 real-UI acceptance. `web-v2` is the blocking entry point the
+# CI job runs: it starts an ISOLATED real stack (fresh PostgreSQL database,
+# real Redis session store, the production auth surface, a production Next
+# build), drives it with Chromium through the DOM only, and writes evidence
+# under tests/web-v2/evidence/. It is deliberately NOT part of `make check`
+# or `make test`: those promise no database, and this target requires one.
+# A missing service, entry point or step fails the run; nothing skips.
+web-v2: ## G23 real-UI journey: isolated real services + Chromium login/session (needs infra-up)
+	bash tests/web-v2/run.sh
+
+web-v2-mutation: ## G23 mutation proof: disconnecting the primary login button turns the journey red
+	bash tests/web-v2/mutation-check.sh
+
+web-v2-unit: ## G23 harness self-tests: bypass scan, step accounting, missing entry/service fail
+	bash scripts/tests/web-v2-unit-test.sh
 
 browser-ok-arity: ## static check: no web-smoke ok() call passes a second argument (T1112)
 # The same guard the runner runs first, on its own so it can be pointed at

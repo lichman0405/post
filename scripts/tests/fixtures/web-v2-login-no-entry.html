@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>fixture: login page without an account entry</title></head>
+  <body>
+    <!--
+      Negative-case fixture: a first-time visitor cannot establish an account
+      here. entrypoint-check.mjs must refuse it. If this page passes, the
+      check is not checking and the "missing account entry point fails the
+      run" acceptance criterion is unmet.
+    -->
+    <main>
+      <div class="auth-card">
+        <h1>Sign in to POST</h1>
+        <form>
+          <label for="email">Email</label>
+          <input id="email" type="email" />
+          <label for="password">Password</label>
+          <input id="password" type="password" />
+          <button type="submit" class="auth-submit">Sign in</button>
+        </form>
+        <p class="auth-sub">
+          Contact your administrator to obtain an account.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>
