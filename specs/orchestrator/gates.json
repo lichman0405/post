@@ -6,6 +6,7 @@
     "task-state",
     "go",
     "web",
+    "web-v2",
     "python",
     "migration-integration",
     "acceptance",
@@ -28,6 +29,7 @@
         "task-state",
         "go",
         "web",
+        "web-v2",
         "python",
         "migration-integration",
         "acceptance",
@@ -50,6 +52,7 @@
         "task-state",
         "go",
         "web",
+        "web-v2",
         "python",
         "migration-integration",
         "acceptance",
@@ -402,6 +405,35 @@
           "env": {
             "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
             "POST_G3_REDIS_ADDR": "127.0.0.1:6379"
+          }
+        }
+      ]
+    },
+    "web-v2": {
+      "steps": [
+        {
+          "run": "corepack enable pnpm && pnpm install --frozen-lockfile"
+        },
+        {
+          "run": "make web-v2",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "WEB_V2_REDIS_ADDR": "127.0.0.1:6379",
+            "WEB_V2_WEB_PORT": "31119"
+          }
+        },
+        {
+          "run": "make web-v2-mutation",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "WEB_V2_REDIS_ADDR": "127.0.0.1:6379"
+          }
+        },
+        {
+          "run": "make web-v2-unit",
+          "env": {
+            "POSTGRES_TEST_ADMIN_URL": "postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post",
+            "WEB_V2_REDIS_ADDR": "127.0.0.1:6379"
           }
         }
       ]

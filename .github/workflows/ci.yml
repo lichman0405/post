@@ -119,6 +119,58 @@ jobs:
           SCIENTIFIC_ADAPTER_URL: http://127.0.0.1:19100
         run: pnpm --filter @post/web build
 
+  web-v2:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+          POSTGRES_DB: post
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4.11-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: "web-v2: install (pnpm via corepack, frozen lockfile)"
+        run: corepack enable pnpm && pnpm install --frozen-lockfile
+      - name: "web-v2: G23 real-UI journey (isolated PG + Redis + API + Next + Chromium)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          WEB_V2_REDIS_ADDR: 127.0.0.1:6379
+          WEB_V2_WEB_PORT: "31119"
+        run: make web-v2
+      - name: "web-v2: mutation proof (button disconnect -> red, restored -> green)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          WEB_V2_REDIS_ADDR: 127.0.0.1:6379
+        run: make web-v2-mutation
+      - name: "web-v2: negative guards (missing service/entry fails)"
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgres://postgres:postgres_dev_pw@127.0.0.1:5432/post
+          WEB_V2_REDIS_ADDR: 127.0.0.1:6379
+        run: make web-v2-unit
+
   # The gate machinery's own e2e. Nothing ran these until now, and one of them
   # rotted the moment a bug it had ENCODED was fixed: rejection-retry asserted
   # that a rework passes --session-id equal to --resume, which real claude
