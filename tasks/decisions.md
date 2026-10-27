@@ -44,6 +44,16 @@
   都不算 WEB-28 通过。
 - **可逆性**：可逆；仅使用既有账号。
 
+## L1-20261027-2 — 所有 Worker spawn/rework/respawn 必须带 provider env
+
+- **决策**：WSL 里的 `rddev worker spawn|rework|respawn|review spawn` 一律通过
+  `python3 ~/with_deepseek.py ./bin/rddev ...` 启动，由包装器在进程内从既有
+  cc-switch DeepSeek profile 注入 `ANTHROPIC_*`。不把 token 写进文件或仓库。
+- **原因**：直接调用 rddev 时 claude 没有 provider 凭据，resume 会话在第一次 API 调用
+  就以 "Not logged in · Please run /login" 退出（T1303 的 scope rework 就这样丢了
+  一次 attempt，exit 1、无 RESULT）。
+- **可逆性**：可逆；若将来用系统级 credential helper，可去掉包装器。
+
 ## L1-20261027-1 — web-v2 成为第 12 个 required CI job
 
 - **决策**：WEB-01 的 harness 合并后，把 `web-v2` 加入 `.github/workflows/ci.yml`、
