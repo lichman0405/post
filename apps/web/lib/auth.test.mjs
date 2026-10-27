@@ -13,9 +13,13 @@ import { test } from "node:test";
 import {
   ApiError,
   createAuthClient,
+  loginHref,
   messageForCode,
   messageForOIDCError,
+  safeNextPath,
+  sessionEndedNotice,
   sessionTokenStorage,
+  signupHref,
 } from "./auth.ts";
 
 const API = "http://127.0.0.1:8080";
@@ -201,4 +205,65 @@ test("sessionTokenStorage falls back to memory outside the browser", () => {
   assert.equal(storage.get(), "tok-x");
   storage.clear();
   assert.equal(storage.get(), null);
+});
+
+/* ------------------------------------------------------------------ *
+ * Return-to-task helpers (T1303 / WEB-02)
+ * ------------------------------------------------------------------ */
+
+test("safeNextPath keeps an internal path and discards everything else", () => {
+  // A site-relative path is returned verbatim, query string included: the
+  // whole point is to land where the reader was.
+  assert.equal(safeNextPath("/projects/abc"), "/projects/abc");
+  assert.equal(safeNextPath("/projects/abc?tab=research"), "/projects/abc?tab=research");
+  assert.equal(safeNextPath("/"), "/");
+
+  // Everything that could leave the site, loop, or split a header is
+  // discarded rather than "cleaned up".
+  for (const bad of [
+    null,
+    undefined,
+    "",
+    "projects",                    // relative, not site-absolute
+    "//evil.example/login",        // protocol-relative URL
+    "/\\evil.example",             // backslash is a slash to browsers
+    "https://evil.example/",       // absolute URL
+    "/projects\r\nLocation: x",    // header-splitting control bytes
+    "/login",                      // the sign-in surface is not a destination
+    "/login?next=/projects",
+    "/login#x",                    // `?next=/login%23x` decodes to this: a loop
+    "/login/?next=/projects",      // and neither is its trailing-slash form
+    // Dot segments are resolved by the browser before it navigates, so these
+    // reach the sign-in surface even though the raw string does not look like
+    // it. The check compares the normalized pathname.
+    "/projects/../login",
+    "/projects/../login?next=/projects",
+    "/%2e%2e/login",
+    "/projects/./../../login",
+    "/login/../login",
+  ]) {
+    assert.equal(safeNextPath(bad), "/", `safeNextPath(${JSON.stringify(bad)})`);
+  }
+});
+
+test("loginHref carries a validated next and falls back to the plain route", () => {
+  assert.equal(loginHref("/"), "/login");
+  assert.equal(loginHref(undefined), "/login");
+  assert.equal(loginHref("/projects/abc"), "/login?next=%2Fprojects%2Fabc");
+  // The target is validated, so a hostile value cannot ride along.
+  assert.equal(loginHref("//evil.example"), "/login");
+});
+
+test("signupHref opens the same /login surface in create-account mode", () => {
+  assert.equal(signupHref("/"), "/login?mode=signup");
+  assert.equal(signupHref("/projects/abc"), "/login?next=%2Fprojects%2Fabc&mode=signup");
+  assert.ok(signupHref("/").startsWith("/login"), "sign-up reuses /login, never a second auth page");
+});
+
+test("sessionEndedNotice names recovery rather than an unexplained sign-out", () => {
+  const notice = sessionEndedNotice();
+  assert.ok(notice.length > 0);
+  assert.match(notice, /[Ss]ign in again/, "the reader is told what to do next");
+  // UNAUTHENTICATED (the guard's anonymous-write answer) shares the line.
+  assert.equal(messageForCode("UNAUTHENTICATED"), notice);
 });

@@ -292,3 +292,155 @@
     display: inline-flex;
   }
 }
+
+/* The home workbench (T1303 / WEB-02, docs/05 §2).
+ *
+ * These rules live in nav.css because the workbench is the consumer of the
+ * shared session surface and is rendered from the same module directory;
+ * they follow the panel typography globals.css already uses (20px page
+ * title, 16px section title, muted 13px lede) rather than introducing a
+ * third type scale. GitHub/Primer tokens only: hairline borders, neutral
+ * background, no gradients. */
+.home-workbench {
+  max-width: 720px;
+  padding: 12px 16px 24px;
+}
+
+.home-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--borderColor-default, #d0d7de);
+}
+
+.home-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.home-lede {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.home-flash {
+  margin: 12px 0 0;
+}
+
+.home-flash-text {
+  display: inline;
+}
+
+.home-entries {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.home-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--fgColor-accent, #0969da);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-entry:hover {
+  text-decoration: underline;
+}
+
+/* The one entry that starts or continues research: the same accent colour,
+   a little more weight, and a hairline underline so it reads as the primary
+   action without becoming a marketing card. */
+.home-entry-primary {
+  border-bottom: 1px solid var(--borderColor-accent-emphasis, #0969da);
+}
+
+.home-entry-label {
+  white-space: nowrap;
+}
+
+.home-section {
+  margin-top: 20px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.home-section-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.home-empty {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.home-project-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.home-project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.home-project-row:last-child {
+  border-bottom: none;
+}
+
+.home-project-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fgColor-accent, #0969da);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-project-link:hover {
+  text-decoration: underline;
+}
+
+.home-project-name {
+  font-size: 14px;
+}
+
+.home-project-slug {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.home-shortcuts {
+  display: flex;
+  gap: 16px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-admin {
+  margin-top: 24px;
+  padding-top: 8px;
+  border-top: 1px solid var(--borderColor-muted, #d8dee4);
+}
+
+.home-admin-link {
+  font-size: 12px;
+  color: var(--fgColor-muted, #59636e);
+}

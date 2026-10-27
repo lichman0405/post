@@ -8,10 +8,19 @@ make the following claim true and reproducible:
 > product's own web page**, the session persists across a reload and a second
 > page, and the harness turns red when that primary control stops working.
 
-The first journey is the U01 login/session slice. Later WEB work packages add
-their own journeys here as the features land; a journey that is not
-implemented yet is not added to the blocking run — but nothing in this harness
-is ever reported as passed for a feature that is absent.
+The journey is the U01 slice: sign-up through the product's own `/login` on
+both of its entries (the in-card toggle, and the home's create-account entry
+which opens `/login?mode=signup` — the same auth surface, not a second one),
+wrong-password recovery, session persistence across a reload and a second
+page, return-to-task after sign-in (`?next=`), the signed-in home's
+project-workspace entry (it navigates to `/projects`; creating a project
+there is WEB-04), and a recoverable prompt when the API no longer accepts the
+session the tab had. On Home the recovery link is plain `/login`, because
+`/` is the default destination; the journey asserts that measured value.
+Later WEB work packages add their own journeys here as the features land; a
+journey that is not implemented yet is not added to the blocking run — but
+nothing in this harness is ever reported as passed for a feature that is
+absent.
 
 ## Run it
 
@@ -94,11 +103,13 @@ step results are the evidence the Supervisor reviews.
 | Missing service/account entry fails instead of skipping | `bash scripts/tests/web-v2-unit-test.sh` | any negative case exits 0 or fails for the wrong reason |
 
 The mutation check edits
-`apps/web/app/(auth)/login/login-card.tsx` **at runtime only**: it removes the
-call from the form's `onSubmit` to `submit()`, runs the journey, restores the
-exact anchor in an `EXIT`/`INT`/`TERM` trap, verifies the file is back to its
-baseline, and requires the restored run to pass. It refuses to run on a dirty
-target file.
+`apps/web/app/(auth)/login/login-card.tsx` **at runtime only**: it snapshots
+the file's current bytes, removes the call from the form's `onSubmit` to
+`submit()`, runs the journey, restores the exact snapshot in an
+`EXIT`/`INT`/`TERM` trap, verifies the bytes are identical to the pre-run
+snapshot, and requires the restored run to pass. A dirty target is expected
+and allowed — this runs on the G2 task tree where the diff is uncommitted —
+and the proof refuses only when the snapshot itself cannot be taken.
 
 ## CI wiring (Supervisor-owned)
 
