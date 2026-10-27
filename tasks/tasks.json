@@ -10370,7 +10370,9 @@
         "apps/web/lib/projects.test.mjs",
         "cmd/api/projectshttp/**",
         "internal/application/projects/**",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -10390,7 +10392,7 @@
         "docs/07_RSG_SPEC.md",
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md"
       ],
-      "supervisor_scope_narrowing": "D16：建立页默认 Public、可选 Private；不改变既有项目可见性。purpose 必填，空状态要给出第一条研究路径入口。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+      "supervisor_scope_narrowing": "D16：建立页默认 Public、可选 Private；不改变既有项目可见性。purpose 必填，空状态要给出第一条研究路径入口。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1 追加 apps/web/lib/i18n.ts 与 i18n.test.mjs：core page 的零硬编码门槛要求新表单文案进入两种语言的目录；只允许添加 projects.create.* 键，不得改既有 key 语义或放宽扫描器。该缺口对其余 web 工作是系统性的，后续任务在派工时同样补。"
     },
     {
       "id": "T1306",
