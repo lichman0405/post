@@ -10255,7 +10255,8 @@
         "apps/web/lib/auth.test.mjs",
         "apps/web/lib/server-config.ts",
         "cmd/api/authhttp/**",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/app/(main)/layout.tsx"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -10275,7 +10276,7 @@
         "docs/05_INFORMATION_ARCHITECTURE.md",
         "docs/06_UI_UX_SPEC.md"
       ],
-      "supervisor_scope_narrowing": "复用既有 /login signup 模式，不新建第二套认证。首页服务诊断移到管理位置；不得用 API 植入 session。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 本次是第一次 Worker 因 max_turns 退出后的重派：worktree 里已有部分实现（home-workbench.tsx、nav session/user area、auth.ts/status、tests/web-v2/harness 扩展）。先读现有 diff 和测试，补完剩余要求，不要整片重写；最终必须写 RESULT.json 并跑完验证。"
+      "supervisor_scope_narrowing": "复用既有 /login signup 模式，不新建第二套认证。首页服务诊断移到管理位置；不得用 API 植入 session。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 本次是第一次 Worker 因 max_turns 退出后的重派：worktree 里已有部分实现（home-workbench.tsx、nav session/user area、auth.ts/status、tests/web-v2/harness 扩展）。先读现有 diff 和测试，补完剩余要求，不要整片重写；最终必须写 RESULT.json 并跑完验证。 Supervisor L1 追加 apps/web/app/(main)/layout.tsx：把 NavSessionProvider 提到共享 layout 是 WEB-02 首页/导航 session 接线的必要条件，原 scope 漏列；该文件只允许这一处 provider lift，不得扩写其他 layout 行为。"
     },
     {
       "id": "T1304",
