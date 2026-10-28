@@ -220,7 +220,7 @@ add_check vuln-node \
   "Dependency/CVE audit (Node/web): pnpm audit at --audit-level=low" \
   "docs/23 §11 (dependency audit)" \
   "pnpm" \
-  "pnpm audit --audit-level=low" \
+  "bash tests/security/vuln-node.sh" \
   '^No known vulnerabilities found'
 
 add_check vuln-python \

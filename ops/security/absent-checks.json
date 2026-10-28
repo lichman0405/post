@@ -13,7 +13,7 @@
       "doc": "docs/23 §11; docs/25 §1 item 9",
       "status": "covered",
       "check_ids": ["vuln-go", "vuln-node", "vuln-python"],
-      "note": "Three ecosystems, three instruments, three separate rows: govulncheck (Go, v1.8.0), pnpm audit --audit-level=low (Node/web), uv audit (Python adapter). Each row is red on its own and each one is NOT ASKED — never silently green — on a host that lacks its tool."
+      "note": "Three ecosystems, three instruments, three separate rows: govulncheck (Go, v1.8.0), pnpm audit --audit-level=low via the scoped vuln-node wrapper (Node/web; one owner-approved low ignore), uv audit (Python adapter). Each row is red on its own and each one is NOT ASKED — never silently green — on a host that lacks its tool."
     },
     {
       "id": "sast",

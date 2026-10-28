@@ -44,6 +44,19 @@
   都不算 WEB-28 通过。
 - **可逆性**：可逆；仅使用既有账号。
 
+## L3-20261028-1 — deepmerge 公告的定向豁免（owner 裁定）
+
+- **决策**：在 `pnpm-workspace.yaml` 的 `auditConfig.ignoreGhsas` 中只忽略
+  `GHSA-gcqx-w48m-w2h4`（deepmerge >=4.2.0 <=4.3.1，low，CVSS 5.3）。
+  `vuln-node` 改为 `tests/security/vuln-node.sh`：只接受“无漏洞”或“恰好 1 条 low
+  且是这条已批准公告”，其他任何新漏洞/额外忽略/不同严重度仍然红。
+- **原因**：该公告经 `@primer/react` 传递，上游无 patched version；它会让全仓
+  所有 G2/merge 永久红。利用需要攻击者可控的 source object，当前用途是主题 token
+  合并。
+- **owner 裁定**：2026-10-28 选择“定向豁免并留痕”（选项 A）。
+- **移除条件**：上游 deepmerge/Primer 发布修复后，删除 ignore 与 wrapper 例外。
+- **可逆性**：完全可逆；两处配置 + 一个脚本。
+
 ## L1-20261027-2 — 所有 Worker spawn/rework/respawn 必须带 provider env
 
 - **决策**：WSL 里的 `rddev worker spawn|rework|respawn|review spawn` 一律通过

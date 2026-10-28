@@ -40,3 +40,10 @@ overrides:
   brace-expansion@>=5.0.0 <5.0.12: '5.0.12'
   source-map-js@<1.2.2: '1.2.2'
   zod@<4.6.6: '4.6.6'
+
+auditConfig:
+  ignoreGhsas:
+    # Owner-approved 2026-10-28: low-severity, transitive via @primer/react,
+    # no patched version. tests/security/vuln-node.sh asserts this is the
+    # only ignored advisory; remove when upstream ships a fix.
+    - GHSA-gcqx-w48m-w2h4
