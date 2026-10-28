@@ -10430,7 +10430,9 @@
         "apps/web/lib/entity-meta.test.mjs",
         "cmd/api/rsghttp/**",
         "internal/application/sciobjects/**",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -10449,7 +10451,7 @@
         "docs/08_SCIENTIFIC_OBJECTS.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "D14：科研内容为主入口。不得把页面做成文件树；legacy overview 卡片必须被可到达的对象详情替代或扩展。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+      "supervisor_scope_narrowing": "D14：科研内容为主入口。不得把页面做成文件树；legacy overview 卡片必须被可到达的对象详情替代或扩展。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。"
     },
     {
       "id": "T1307",

@@ -13034,10 +13034,12 @@
       ]
     },
     "T1305": {
-      "status": "verification",
-      "started_at": "2026-10-27T10:11:06Z",
-      "worker_run_id": "run-b269c1c461040ba5",
-      "rejection_reason": "G2 red on sast-node and on the WEB-04 journey's duplicate-address assertion\n(the observability scrape-grid jitter is load, not yours).\n\n1) sast-node — fix without baselining:\n   apps/web/lib/i18n.ts:1336:17, :1336:37, :1337:17, :1343:25\n   apps/web/lib/projects.ts:296:24\n   Use Object.entries / a Map / an explicit allow-list; re-run\n   `bash tests/security/sast.sh node` -> 0 unbaselined.\n\n2) WEB-04 journey — the restored run fails:\n   \"the duplicate address did not answer 409 from POST /api/v1/projects\n    (observed no response)\".\n   The acceptance criterion is: duplicate address shows a field error and no\n   second project is created. If the form legitimately blocks client-side, the\n   journey must assert the visible field error and the project count staying 1,\n   not demand an API 409. If it does submit and receives 409, assert that and\n   the field error. Either way, the restored tree must be green for the real\n   product behaviour; do not weaken the assertion to nothing.\n\n3) Re-run `make web-v2` (all journeys), `make web-v2-mutation`,\n   `make web-v2-unit`, web typecheck/lint/unit and sast-node; record exact\n   commands/outputs in RESULT. Do not touch .github/specs/docs.\n",
+      "status": "merged",
+      "started_at": "2026-10-28T04:17:19Z",
+      "worker_run_id": "run-bfe53332cc81e1f7",
+      "accepted_by_supervisor_at": "2026-10-28T05:00:48Z",
+      "merged_at": "2026-10-28T05:14:05Z",
+      "rejection_reason": "Blocking: scope breach in apps/web/lib/i18n.ts. The task allows ADDING\nprojects.create.* keys only; it does not allow rewriting translate()/CATALOG.\nThe CATALOG Map + translate rewrite changes every page's lookup, snapshots\nMESSAGES at import, and leaves baseline entries stale. Revert the translate()\nand CATALOG changes to the exact baseline implementation; keep only the new\nkey/value additions in both locales. Do not \"fix\" the already-baselined\nobject-injection findings by rewriting the module.\n\nMajor: createFieldForError's VALIDATION_FAILED startsWith branch can never\nmatch: the API body is 'projects: invalid input: <rule>'. Either parse the\nsuffix/use a stable mapping and add a unit test with the real wire message, or\nremove the dead branch and the comment that claims it works; do not claim\nfield mapping that cannot fire.\n\nMinor:\n- client-side name/purpose limits measure UTF-16 units while the API measures\n  bytes; mirror the byte rule (TextEncoder) or rely on the API mapping.\n- projects.test.mjs:298 is hollow (it builds `seen` from the loop); assert the\n  recorded request bodies' visibility/organization_id.\n- create-path refusal sentences are English-only in lib/projects.ts; either\n  move them to the catalog if the tightening allows or state the gap honestly\n  in RESULT (do not imply a bilingual create surface).\n- RESULT says three runs are green; only two full runs precede it. Correct the\n  count and cite the actual runs.\n- harness comment: the organizations mount already existed; do not attribute\n  it to WEB-04.\n\nRe-run `make i18n`, web typecheck/lint/unit, `make web-v2` (U01+U02+WEB-04),\n`make web-v2-unit`, `make web-v2-mutation`, sast-node; record exact outputs.\n",
       "history": [
         {
           "from": "todo",
@@ -13093,6 +13095,81 @@
           "at": "2026-10-28T01:34:06Z",
           "run_id": "run-f9974420d6eaa005",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-28T04:04:01Z",
+          "run_id": "run-6f59d9803a766d47",
+          "reason": "Manual conflict composition: WEB-03 (#394) merged after this branch was cut and\nchanged the shared tests/web-v2/harness/main.go and run.sh. The Supervisor\ncomposed both journeys (U02 + WEB-04) on the new main, committed them, and the\ntask branch is now main + that composition. Advance the baseline onto main and\nkeep the composed work; the journey order is U01, U02, then WEB-04.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T04:04:05Z",
+          "run_id": "run-a0e58957b8de910f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-10-28T04:04:20Z",
+          "run_id": "run-8f02865d30455e27",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-10-28T04:04:36Z",
+          "run_id": "run-32bfcd19a6b0671c"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T04:04:38Z",
+          "run_id": "run-1197b72d3bfb9e13",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T04:10:55Z",
+          "run_id": "run-cc2dd5cfa8ce170b",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-28T04:17:18Z",
+          "run_id": "run-8549f8897f4cee8e",
+          "reason": "Blocking: scope breach in apps/web/lib/i18n.ts. The task allows ADDING\nprojects.create.* keys only; it does not allow rewriting translate()/CATALOG.\nThe CATALOG Map + translate rewrite changes every page's lookup, snapshots\nMESSAGES at import, and leaves baseline entries stale. Revert the translate()\nand CATALOG changes to the exact baseline implementation; keep only the new\nkey/value additions in both locales. Do not \"fix\" the already-baselined\nobject-injection findings by rewriting the module.\n\nMajor: createFieldForError's VALIDATION_FAILED startsWith branch can never\nmatch: the API body is 'projects: invalid input: <rule>'. Either parse the\nsuffix/use a stable mapping and add a unit test with the real wire message, or\nremove the dead branch and the comment that claims it works; do not claim\nfield mapping that cannot fire.\n\nMinor:\n- client-side name/purpose limits measure UTF-16 units while the API measures\n  bytes; mirror the byte rule (TextEncoder) or rely on the API mapping.\n- projects.test.mjs:298 is hollow (it builds `seen` from the loop); assert the\n  recorded request bodies' visibility/organization_id.\n- create-path refusal sentences are English-only in lib/projects.ts; either\n  move them to the catalog if the tightening allows or state the gap honestly\n  in RESULT (do not imply a bilingual create surface).\n- RESULT says three runs are green; only two full runs precede it. Correct the\n  count and cite the actual runs.\n- harness comment: the organizations mount already existed; do not attribute\n  it to WEB-04.\n\nRe-run `make i18n`, web typecheck/lint/unit, `make web-v2` (U01+U02+WEB-04),\n`make web-v2-unit`, `make web-v2-mutation`, sast-node; record exact outputs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T04:17:19Z",
+          "run_id": "run-bfe53332cc81e1f7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T04:24:27Z",
+          "run_id": "run-f0840f50dc992b59",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-28T05:00:48Z",
+          "run_id": "run-add2c812f48ae45f"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-28T05:14:05Z",
+          "run_id": "run-7854b2d22ebc8bf7",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },

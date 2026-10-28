@@ -96,8 +96,13 @@
         "U01",
         "U02"
       ],
-      "issue": null,
-      "pull_requests": []
+      "issue": 395,
+      "pull_requests": [
+        396
+      ],
+      "task_issues": {
+        "T1305": 395
+      }
     },
     {
       "web": "WEB-05",
