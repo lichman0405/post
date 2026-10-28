@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lichman0405/post/internal/domain"
 	"github.com/lichman0405/post/internal/observability"
@@ -125,6 +126,66 @@ func (s *Service) SetMemberRole(ctx context.Context, actor domain.User, projectI
 		return domain.ProjectMembership{}, wrapStoreError(err)
 	}
 	return updated, nil
+}
+
+// AddMember adds an existing account, named by its handle, to the project
+// at the given role (T1335: the Settings "add member" flow — an owner or
+// maintainer types a handle and picks a role). The rules:
+//
+//   - owner/maintainer only (the requireManager gate);
+//   - the role must be one of the four canonical roles;
+//   - a maintainer may not add someone as owner (owner management is
+//     owner-only — the same L1 rule SetMemberRole enforces, so a
+//     maintainer cannot reach by invite what they cannot grant by role
+//     change);
+//   - the handle must name an existing account: V1 has no pending
+//     invitations for external addresses (the organization invite took
+//     the same decision), so an unknown handle is ErrUserNotFound;
+//   - an account that already holds a membership is ErrAlreadyMember —
+//     never a silent role change, because "add" and "change role" are two
+//     different governance actions.
+//
+// The write records the project.member_role_changed audit entry (the same
+// action SetMemberRole uses — a membership at role R, before: none after:
+// R) in the same transaction as the row.
+func (s *Service) AddMember(ctx context.Context, actor domain.User, projectID, handle string, role domain.ProjectRole) (domain.ProjectMembership, error) {
+	if !domain.ValidProjectRole(role) {
+		return domain.ProjectMembership{}, fmt.Errorf("%w: role must be owner, maintainer, contributor or viewer", ErrValidation)
+	}
+	if strings.TrimSpace(handle) == "" {
+		return domain.ProjectMembership{}, fmt.Errorf("%w: handle is required", ErrValidation)
+	}
+	if _, err := s.Get(ctx, Reader{UserID: actor.ID, Authenticated: true}, projectID); err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	actorRole, err := s.requireManager(ctx, projectID, actor.ID)
+	if err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	if actorRole != domain.ProjectRoleOwner && role == domain.ProjectRoleOwner {
+		return domain.ProjectMembership{}, ErrOwnerRoleChange
+	}
+	target, err := s.store.GetUserByHandle(ctx, domain.NormalizeHandle(handle))
+	if err != nil {
+		return domain.ProjectMembership{}, wrapStoreError(err)
+	}
+	if _, err := s.store.GetMembership(ctx, projectID, target.ID); err == nil {
+		return domain.ProjectMembership{}, ErrAlreadyMember
+	} else if !errors.Is(err, ErrMemberNotFound) {
+		return domain.ProjectMembership{}, wrapStoreError(err)
+	}
+	audit, err := s.settingsAudit(ctx, actor, projectID,
+		domain.ActionProjectMemberRoleChanged, "user:"+target.ID,
+		nil,
+		map[string]any{"user_id": target.ID, "role": string(role)})
+	if err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	added, err := s.store.AddProjectMembership(ctx, projectID, target.ID, role, audit)
+	if err != nil {
+		return domain.ProjectMembership{}, wrapStoreError(err)
+	}
+	return added, nil
 }
 
 // UpdateSettings edits the project purpose and/or activity status.

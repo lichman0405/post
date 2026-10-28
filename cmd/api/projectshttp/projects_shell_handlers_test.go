@@ -45,7 +45,11 @@ type stubProjectStore struct {
 	// (nil for the shell-only tests). The audit entries the writes
 	// produce land in audits.
 	settingsMembers map[string]domain.ProjectMembership
-	audits          []domain.AuditEntry
+	// users is the account directory the invite path resolves handles
+	// against (keyed by normalized handle), standing in for the users
+	// table (T1335).
+	users  map[string]domain.User
+	audits []domain.AuditEntry
 }
 
 func (s *stubProjectStore) CreateProject(context.Context, domain.Project, string) (domain.Project, domain.ProjectMembership, error) {
@@ -100,6 +104,38 @@ func (s *stubProjectStore) ListProjectMembers(_ context.Context, projectID strin
 		return out[i].UserID < out[j].UserID
 	})
 	return out, nil
+}
+
+// GetUserByHandle resolves a handle from the stub's account directory
+// (T1335: the invite path names a person, not an id). A handle the
+// directory does not know is ErrUserNotFound, exactly like the adapters.
+func (s *stubProjectStore) GetUserByHandle(_ context.Context, handle string) (domain.User, error) {
+	if u, ok := s.users[domain.NormalizeHandle(handle)]; ok {
+		return u, nil
+	}
+	return domain.User{}, projects.ErrUserNotFound
+}
+
+// AddProjectMembership adds one row to the settings member map and records
+// the audit entry; a duplicate answers ErrAlreadyMember like the
+// production primary-key conflict.
+func (s *stubProjectStore) AddProjectMembership(_ context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	if s.project.ID != projectID {
+		return domain.ProjectMembership{}, projects.ErrProjectNotFound
+	}
+	if s.settingsMembers == nil {
+		return domain.ProjectMembership{}, projects.ErrStore
+	}
+	if m, ok := s.settingsMembers[userID]; ok && m.ProjectID == projectID {
+		return domain.ProjectMembership{}, projects.ErrAlreadyMember
+	}
+	m := domain.ProjectMembership{
+		ProjectID: projectID, UserID: userID, Role: role,
+		CreatedAt: time.Date(2026, 9, 13, 8, 0, 0, 0, time.UTC),
+	}
+	s.settingsMembers[userID] = m
+	s.audits = append(s.audits, audit)
+	return m, nil
 }
 
 func (s *stubProjectStore) UpdateMembershipRole(_ context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {

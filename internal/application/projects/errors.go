@@ -48,6 +48,14 @@ const (
 	// CodeOwnerRoleChangeForbidden is returned when a maintainer tries to
 	// grant or revoke the owner role (owner management is owner-only).
 	CodeOwnerRoleChangeForbidden = "OWNER_ROLE_CHANGE_FORBIDDEN"
+	// CodeUserNotFound is returned when adding a member names a handle no
+	// account carries (the account must exist — V1 has no pending
+	// invitations; the same code the organization surface answers).
+	CodeUserNotFound = "USER_NOT_FOUND"
+	// CodeMemberAlreadyExists is returned when adding a member names an
+	// account that already holds a membership in the project (the same
+	// code the organization invite answers).
+	CodeMemberAlreadyExists = "MEMBER_ALREADY_EXISTS"
 	// CodeVisibilityChangeNotSupported is returned when a client asks to
 	// change visibility: the setting is preview-only until the publishing
 	// guard lands (T0109 requirement).
@@ -100,6 +108,11 @@ var (
 	// ErrOwnerRoleChange: a maintainer may not grant or revoke the owner
 	// role.
 	ErrOwnerRoleChange = errors.New("projects: only owners manage the owner role")
+	// ErrUserNotFound: adding a member named a handle no account carries.
+	ErrUserNotFound = errors.New("projects: user not found")
+	// ErrAlreadyMember: adding a member named an account that already
+	// holds a membership in the project.
+	ErrAlreadyMember = errors.New("projects: user is already a member")
 	// ErrVisibilityChangeNotSupported: visibility is preview-only until
 	// the publishing guard lands.
 	ErrVisibilityChangeNotSupported = errors.New("projects: visibility changes are not supported yet")

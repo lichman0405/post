@@ -73,5 +73,6 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/membership", h.handleMembership)
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/members", h.handleListMembers)
 	mux.HandleFunc("PUT /api/v1/projects/{projectId}/members/{userId}", h.handleSetMemberRole)
+	mux.HandleFunc("POST /api/v1/projects/{projectId}/members", h.handleAddMember)
 	return mux
 }

@@ -86,6 +86,17 @@ func (s *visProjectStore) GetProgram(context.Context, string) (domain.Program, e
 	return domain.Program{}, projects.ErrProgramNotFound
 }
 
+// T1335 added the invite path to the port (resolve a handle, add a
+// membership); the visibility suite never invites, so both answer the
+// store-failure sentinel like the other unused writes.
+func (s *visProjectStore) GetUserByHandle(context.Context, string) (domain.User, error) {
+	return domain.User{}, projects.ErrStore
+}
+
+func (s *visProjectStore) AddProjectMembership(context.Context, string, string, domain.ProjectRole, domain.AuditEntry) (domain.ProjectMembership, error) {
+	return domain.ProjectMembership{}, projects.ErrStore
+}
+
 // visOrgGate satisfies projects.OrgGate (unused by the validate route).
 type visOrgGate struct{}
 

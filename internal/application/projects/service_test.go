@@ -27,8 +27,11 @@ type fakeStore struct {
 	// contract is "oldest membership first"; the map alone has no order).
 	memberOrder [][2]string
 	programs    map[string]domain.Program
-	audits      []domain.AuditEntry
-	nextID      int
+	// userDir is the account directory the invite path resolves handles
+	// against, keyed by normalized handle (T1335).
+	userDir map[string]domain.User
+	audits  []domain.AuditEntry
+	nextID  int
 	// gate is the organization state the store re-checks inside
 	// CreateProject, mirroring the production transaction.
 	gate *fakeGate
@@ -42,6 +45,7 @@ func newFakeStore() *fakeStore {
 		projects: map[string]domain.Project{},
 		members:  map[[2]string]domain.ProjectMembership{},
 		programs: map[string]domain.Program{},
+		userDir:  map[string]domain.User{},
 		gate:     newFakeGate(),
 	}
 }
@@ -66,6 +70,14 @@ func (s *fakeStore) seedMember(projectID, userID string, role domain.ProjectRole
 	s.members[key] = domain.ProjectMembership{
 		ProjectID: projectID, UserID: userID, Role: role,
 	}
+}
+
+// seedUser registers an account the invite path can resolve by handle
+// (T1335: members are added by handle, so the store needs a directory).
+func (s *fakeStore) seedUser(handle string) domain.User {
+	u := domain.User{ID: "user-" + handle, Handle: handle}
+	s.userDir[domain.NormalizeHandle(handle)] = u
+	return u
 }
 
 func (s *fakeStore) seedProgram(programID, orgID string) {
@@ -179,6 +191,28 @@ func (s *fakeStore) UpdateMembershipRole(ctx context.Context, projectID, userID 
 	s.members[key] = current
 	s.audits = append(s.audits, audit)
 	return current, nil
+}
+
+func (s *fakeStore) AddProjectMembership(ctx context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	if _, ok := s.projects[projectID]; !ok {
+		return domain.ProjectMembership{}, ErrProjectNotFound
+	}
+	key := [2]string{projectID, userID}
+	if _, exists := s.members[key]; exists {
+		return domain.ProjectMembership{}, ErrAlreadyMember
+	}
+	m := domain.ProjectMembership{ProjectID: projectID, UserID: userID, Role: role}
+	s.members[key] = m
+	s.memberOrder = append(s.memberOrder, key)
+	s.audits = append(s.audits, audit)
+	return m, nil
+}
+
+func (s *fakeStore) GetUserByHandle(ctx context.Context, handle string) (domain.User, error) {
+	if u, ok := s.userDir[handle]; ok {
+		return u, nil
+	}
+	return domain.User{}, ErrUserNotFound
 }
 
 func (s *fakeStore) UpdateProjectSettings(ctx context.Context, projectID string, purpose, activityStatus *string, audit domain.AuditEntry) (domain.Project, error) {

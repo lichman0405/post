@@ -86,6 +86,17 @@ func (s *filesProjectStore) GetProgram(context.Context, string) (domain.Program,
 	return domain.Program{}, projects.ErrProgramNotFound
 }
 
+// T1335 added the invite path to the port (resolve a handle, add a
+// membership); the files suite never invites, so both answer the
+// store-failure sentinel like the other unused writes.
+func (s *filesProjectStore) GetUserByHandle(context.Context, string) (domain.User, error) {
+	return domain.User{}, projects.ErrStore
+}
+
+func (s *filesProjectStore) AddProjectMembership(context.Context, string, string, domain.ProjectRole, domain.AuditEntry) (domain.ProjectMembership, error) {
+	return domain.ProjectMembership{}, projects.ErrStore
+}
+
 // filesOrgGate satisfies projects.OrgGate (unused by the files routes).
 type filesOrgGate struct{}
 

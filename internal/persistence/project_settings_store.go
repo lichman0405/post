@@ -96,6 +96,72 @@ func (s *ProjectStore) UpdateMembershipRole(ctx context.Context, projectID, user
 	return updated, nil
 }
 
+// AddProjectMembership implements projects.ProjectStore (T1335): inserts
+// one membership for an account the service already resolved from its
+// handle, and records the audit entry in the SAME transaction. The project
+// row is locked first — the same project-wide serialization point
+// UpdateMembershipRole takes — so a concurrent role change, remove or
+// second invite can never interleave with an add. A duplicate membership
+// arrives as the primary-key conflict (23505 on project_memberships) and
+// is answered as ErrAlreadyMember: two racing invites add exactly one row,
+// and the loser learns the person is already a member instead of the store
+// failing.
+func (s *ProjectStore) AddProjectMembership(ctx context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	pID, uID, err := twoUUIDs(projectID, userID)
+	if err != nil {
+		// The service resolves the user from the users table, so a
+		// malformed id here is a malformed project id: answer the same
+		// not-found an unknown project answers.
+		return domain.ProjectMembership{}, projects.ErrProjectNotFound
+	}
+	var added domain.ProjectMembership
+	err = WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		if _, err := q.GetProjectByIDForUpdate(ctx, pID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return projects.ErrProjectNotFound
+			}
+			return err
+		}
+		row, err := q.AddProjectMembership(ctx, sqlc.AddProjectMembershipParams{
+			ProjectID: pID,
+			UserID:    uID,
+			Role:      string(role),
+		})
+		if err != nil {
+			return mapProjectWriteError(err)
+		}
+		added = projectMembershipFromRow(row)
+		return appendAudit(ctx, q, audit)
+	})
+	if err != nil {
+		return domain.ProjectMembership{}, err
+	}
+	return added, nil
+}
+
+// GetUserByHandle implements projects.ProjectStore (T1335): the invite
+// path names a person by handle, so the adapter resolves the account
+// before the membership insert. An unknown handle is ErrUserNotFound —
+// V1 has no pending invitations, and the service turns that into the
+// wire's USER_NOT_FOUND rather than inventing an account.
+func (s *ProjectStore) GetUserByHandle(ctx context.Context, handle string) (domain.User, error) {
+	row, err := sqlc.New(s.pool).GetUserByHandle(ctx, handle)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, projects.ErrUserNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("persistence: get user by handle: %w", err)
+	}
+	return domain.User{
+		ID:          pgUUIDToText(row.ID),
+		Handle:      row.Handle,
+		Email:       nullStringToValue(row.Email),
+		DisplayName: row.DisplayName,
+		CreatedAt:   row.CreatedAt.Time,
+	}, nil
+}
+
 // UpdateProjectSettings implements projects.ProjectStore: applies the
 // edit (only the non-nil fields) and records the audit entry in the same
 // transaction.

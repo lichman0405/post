@@ -89,6 +89,17 @@ func (s *stubProjectStore) GetProgram(context.Context, string) (domain.Program, 
 	return domain.Program{}, projects.ErrProgramNotFound
 }
 
+// T1335 added the invite path to the port (resolve a handle, add a
+// membership); the git-token suite never invites, so both answer the
+// store-failure sentinel like the other unused writes.
+func (s *stubProjectStore) GetUserByHandle(context.Context, string) (domain.User, error) {
+	return domain.User{}, projects.ErrStore
+}
+
+func (s *stubProjectStore) AddProjectMembership(context.Context, string, string, domain.ProjectRole, domain.AuditEntry) (domain.ProjectMembership, error) {
+	return domain.ProjectMembership{}, projects.ErrStore
+}
+
 // stubEngine allows every request — the matrix is covered elsewhere; the
 // handler's role projection is what this suite exercises.
 type stubEngine struct{}
