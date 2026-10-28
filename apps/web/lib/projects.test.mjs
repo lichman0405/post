@@ -13,9 +13,13 @@ import { test } from "node:test";
 
 import {
   ApiError,
+  createFieldForError,
   createProjectsClient,
   mayManageSettings,
   messageForProjectCode,
+  projectNameProblem,
+  projectPurposeProblem,
+  projectSlugProblem,
 } from "./projects.ts";
 
 const API = "http://127.0.0.1:8080";
@@ -256,6 +260,179 @@ test("updateSettings surfaces VISIBILITY_CHANGE_NOT_SUPPORTED as an ApiError", a
     () => client.updateSettings(PROJECT.id, { purpose: "x" }),
     (err) => err instanceof ApiError && err.code === "VISIBILITY_CHANGE_NOT_SUPPORTED",
   );
+});
+
+test("create POSTs the form's values with the session CSRF token", async () => {
+  const { fetchFn, calls } = fakeFetch({
+    "POST /api/v1/projects": async () => ({
+      status: 201,
+      json: async () => ({ project: PROJECT, membership: MEMBERSHIP }),
+    }),
+  });
+  const client = createProjectsClient(API, {
+    fetch: fetchFn,
+    csrfToken: () => "session-token-1",
+  });
+  const created = await client.create({
+    slug: "alloy-lab",
+    name: "Alloy Lab",
+    purpose: "Design high-entropy alloys",
+    visibility: "private",
+  });
+  assert.equal(created.project.slug, "alloy-lab");
+  assert.equal(created.membership.role, "owner");
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].path, "/api/v1/projects");
+  assert.equal(calls[0].credentials, "include");
+  assert.equal(calls[0].headers["X-CSRF-Token"], "session-token-1");
+  assert.equal(calls[0].headers["Content-Type"], "application/json");
+  // A personal project sends explicit nulls, never an empty string: the API
+  // refuses "" rather than reading it as "no organization".
+  assert.deepEqual(JSON.parse(calls[0].body), {
+    slug: "alloy-lab",
+    name: "Alloy Lab",
+    purpose: "Design high-entropy alloys",
+    visibility: "private",
+    organization_id: null,
+    program_id: null,
+  });
+});
+
+test("create sends the visibility the form chose, never a default", async () => {
+  // D16: Public is the FORM's default, not the client's. A caller that omits
+  // a visibility must not be silently published, so the request carries
+  // whatever it was given and the API refuses anything but the two values.
+  // Assert the WIRE bodies, not a local array built by the loop (which would
+  // pass even if create() dropped visibility entirely).
+  const { fetchFn, calls } = fakeFetch({
+    "POST /api/v1/projects": async () => ({
+      status: 201,
+      json: async () => ({ project: PROJECT, membership: MEMBERSHIP }),
+    }),
+  });
+  const client = createProjectsClient(API, { fetch: fetchFn });
+  await client.create({ slug: "p-public", name: "N", purpose: "P", visibility: "public" });
+  await client.create({
+    slug: "p-private",
+    name: "N",
+    purpose: "P",
+    visibility: "private",
+    organization_id: "org-1",
+  });
+  assert.equal(calls.length, 2);
+  const first = JSON.parse(calls[0].body);
+  const second = JSON.parse(calls[1].body);
+  assert.equal(first.visibility, "public");
+  assert.equal(first.organization_id, null);
+  assert.equal(second.visibility, "private");
+  assert.equal(second.organization_id, "org-1");
+});
+
+test("create surfaces a duplicate slug as PROJECT_SLUG_TAKEN and maps it to the slug field", async () => {
+  const { fetchFn, calls } = fakeFetch({
+    "POST /api/v1/projects": async () => ({
+      status: 409,
+      json: async () => ({
+        code: "PROJECT_SLUG_TAKEN",
+        message: "a project with this slug already exists",
+      }),
+    }),
+  });
+  const client = createProjectsClient(API, { fetch: fetchFn });
+  let caught;
+  try {
+    await client.create({ slug: "alloy-lab", name: "Alloy Lab", purpose: "x", visibility: "public" });
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(caught instanceof ApiError);
+  assert.equal(caught.code, "PROJECT_SLUG_TAKEN");
+  assert.equal(caught.status, 409);
+  // Exactly one request: the refusal is not retried behind the reader's back.
+  assert.equal(calls.length, 1);
+  assert.equal(createFieldForError(caught), "slug");
+  assert.match(messageForProjectCode(caught.code), /already exists/);
+});
+
+test("create rejects a malformed 201 body instead of handing the form a half project", async () => {
+  const { fetchFn } = fakeFetch({
+    "POST /api/v1/projects": async () => ({ status: 201, json: async () => ({ project: PROJECT }) }),
+  });
+  const client = createProjectsClient(API, { fetch: fetchFn });
+  await assert.rejects(
+    () => client.create({ slug: "s", name: "N", purpose: "P", visibility: "public" }),
+    /unexpected project create response shape/,
+  );
+});
+
+test("createFieldForError picks the field from the REAL VALIDATION_FAILED wire message", () => {
+  // The wire sentence is `projects: invalid input: <rule>` — ErrValidation's
+  // own text plus the service's `%w: …` rule (internal/application/projects
+  // service.go). Using the real shape is the point: a leading-word check
+  // against the message used to never match because it begins with the
+  // service name, so this test fails any regression to that spelling.
+  const err = (message) => new ApiError(400, { code: "VALIDATION_FAILED", message });
+  assert.equal(
+    createFieldForError(
+      err("projects: invalid input: slug may only contain lowercase letters, digits and dashes (max 64 characters)"),
+    ),
+    "slug",
+  );
+  assert.equal(
+    createFieldForError(err("projects: invalid input: name is required (max 200 characters)")),
+    "name",
+  );
+  assert.equal(
+    createFieldForError(err("projects: invalid input: purpose is required (max 4000 characters)")),
+    "purpose",
+  );
+  assert.equal(
+    createFieldForError(err("projects: invalid input: visibility must be public or private")),
+    "visibility",
+  );
+  // Refusals that name no input stay form-level rather than being pinned to a
+  // field the reader would not recognise.
+  assert.equal(
+    createFieldForError(err("projects: invalid input: a program requires an organization")),
+    null,
+  );
+  assert.equal(
+    createFieldForError(err("projects: invalid input: organization_id must be null or a valid id")),
+    null,
+  );
+  assert.equal(createFieldForError(err("projects: invalid input: request body must be valid JSON")), null);
+  assert.equal(createFieldForError(new ApiError(403, { code: "PROJECT_FORBIDDEN", message: "not an active member" })), null);
+  assert.equal(createFieldForError(new Error("transport")), null);
+  assert.equal(createFieldForError(undefined), null);
+});
+
+test("the client-side length rules measure bytes, matching the API", () => {
+  // internal/domain uses len() in BYTES: name <= 200, purpose <= 4000. A
+  // JS .length check would accept 200 CJK characters (600 bytes) here and
+  // leave the reader with an avoidable round trip and a raw API sentence.
+  const cjk = "研"; // 3 UTF-8 bytes
+  assert.equal(projectNameProblem("a".repeat(200)), null);
+  assert.equal(projectNameProblem("a".repeat(201)), "invalid");
+  assert.equal(projectNameProblem(cjk.repeat(66)), null); // 198 bytes
+  assert.equal(projectNameProblem(cjk.repeat(67)), "invalid"); // 201 bytes, only 67 UTF-16 units
+  assert.equal(projectPurposeProblem("a".repeat(4000)), null);
+  assert.equal(projectPurposeProblem("a".repeat(4001)), "invalid");
+  assert.equal(projectPurposeProblem(cjk.repeat(1333)), null); // 3999 bytes
+  assert.equal(projectPurposeProblem(cjk.repeat(1334)), "invalid"); // 4002 bytes
+  assert.equal(projectPurposeProblem(""), "required");
+  assert.equal(projectNameProblem("   "), "required");
+  // Slug is ASCII-only by rule, so its own 64 bound is unaffected.
+  assert.equal(projectSlugProblem("a".repeat(64)), null);
+  assert.equal(projectSlugProblem("a".repeat(65)), "invalid");
+});
+
+test("messageForProjectCode maps the create-path codes", () => {
+  assert.match(messageForProjectCode("PROJECT_SLUG_TAKEN"), /already exists/);
+  assert.match(messageForProjectCode("PROJECT_FORBIDDEN"), /active member/);
+  assert.match(messageForProjectCode("ORG_NOT_FOUND"), /organization does not exist/);
+  assert.match(messageForProjectCode("ORG_DEACTIVATED"), /deactivated/);
+  assert.match(messageForProjectCode("PROGRAM_NOT_FOUND"), /program does not exist/);
+  assert.match(messageForProjectCode("PROGRAM_ORG_MISMATCH"), /different organization/);
 });
 
 test("messageForProjectCode maps the stable codes", () => {
