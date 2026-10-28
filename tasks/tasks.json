@@ -10451,7 +10451,7 @@
         "docs/08_SCIENTIFIC_OBJECTS.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "D14：科研内容为主入口。不得把页面做成文件树；legacy overview 卡片必须被可到达的对象详情替代或扩展。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。"
+      "supervisor_scope_narrowing": "D14：科研内容为主入口。不得把页面做成文件树；legacy overview 卡片必须被可到达的对象详情替代或扩展。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。 本次是 max_turns 退出后的重派：worktree 里已有对象详情/版本、Research Map、fixture、journey-web05 与 i18n 键的部分实现。先读现状，补完剩余要求并写 RESULT；不要整片重写，不要提交编译产物。"
     },
     {
       "id": "T1307",
