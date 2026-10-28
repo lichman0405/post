@@ -10424,8 +10424,8 @@
       ],
       "allowed_scope": [
         "apps/web/app/(main)/projects/[id]/research/**",
-        "apps/web/app/(main)/projects/[id]/page.tsx",
-        "apps/web/app/(main)/projects/[id]/tab-placeholder.tsx",
+        "apps/web/app/(main)/projects/[[]id]/page.tsx",
+        "apps/web/app/(main)/projects/[[]id]/tab-placeholder.tsx",
         "apps/web/lib/entity-meta.ts",
         "apps/web/lib/entity-meta.test.mjs",
         "cmd/api/rsghttp/**",
