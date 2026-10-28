@@ -17,21 +17,19 @@
 #   1. the static anti-bypass scan over every journey/helper module;
 #   2. the entry-point pre-flight (sign-in form + account-establishment
 #      entry) — missing entry fails, it never skips;
-#   3. the U01/U02 browser journey: sign up through the DOM, the signed-in
-#      home's project entry works, the session survives a reload and a second
-#      page, sign out, a wrong password is reported recoverably, signing in
-#      from another page returns to it, the session survives another reload,
-#      and a session ended elsewhere offers a recoverable sign-in prompt;
-#   4. the T1304 (WEB-03) browser journey over THREE real accounts and three
-#      isolated browser contexts: A creates an organization through the web
-#      form and owns it, B and V create their own accounts, A invites them by
-#      handle as Contributor and Viewer, V's attempt to promote itself is
-#      refused by the API and shown on the page, A's role change for B
-#      survives both readers' reloads without rewriting the affiliation
-#      start, and V leaves with its membership row kept.
-#
-# Every journey writes its own evidence directory under the run's evidence
-# (the U02 slice under <run>/u02), and a failing journey fails the run.
+#   3. the browser journey: sign up through the DOM, the signed-in home's
+#      project entry works, the session survives a reload and a second page,
+#      sign out, a wrong password is reported recoverably, signing in from
+#      another page returns to it, the session survives another reload, and
+#      a session ended elsewhere offers a recoverable sign-in prompt;
+#   4. the WEB-03 (U02) journey: organizations, invites, roles, leave;
+#   5. the WEB-04 journey (T1305): a new account's empty directory offers the
+#      first research path, a project is created through D16's Public default
+#      and a second one through an explicit Private choice, a duplicate
+#      address is a field error that creates nothing, and a fresh anonymous
+#      context can see neither the private project nor its existence.
+#      NOTE the order: this journey CREATES projects, so it runs after the
+#      ones whose assertions are about a new account's empty directory.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.
@@ -255,6 +253,17 @@ mkdir -p "$U02_EVIDENCE_DIR"
 if ! WEB_V2_EVIDENCE_DIR="$U02_EVIDENCE_DIR" node "$V2_DIR/journey-u02.mjs" "$BASE"; then
   cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
   fail "the WEB-03 (U02) browser journey failed (evidence: $U02_EVIDENCE_DIR)"
+fi
+
+# ---- 12. WEB-04 browser journey (create a project, and who may see it) ------
+# Runs last on purpose: it creates projects, and the journeys above assert a
+# new account's EMPTY directory. The journey writes its own evidence under
+# $EVIDENCE_DIR/web04 (it appends "web04"), so it cannot overwrite another
+# journey's metadata/steps/trace.
+echo "== web-v2: browser journey (WEB-04 create: Public default, Private choice, duplicate address, anonymous hiding) =="
+if ! node "$V2_DIR/journey-web04.mjs" "$BASE"; then
+  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+  fail "the WEB-04 browser journey failed (evidence: $EVIDENCE_DIR/web04)"
 fi
 
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true

@@ -1274,6 +1274,95 @@ export function translate(
   });
 }
 
+/*
+ * WEB-04 (D16) create-surface copy: the whole `projects.create.*` block.
+ *
+ * These keys are appended to each locale's table AFTER the translator rather
+ * than written inside the two literals above, because the repository's SAST
+ * baseline records findings by `path:line:column`: inserting ~70 lines above
+ * translate() would move its reviewed lookups to new lines and arrive as
+ * unbaselined findings even though the code is byte-identical. Placing the
+ * additions here keeps translate() exactly at its reviewed lines and still
+ * makes the catalog the single source of truth — the merge runs at import,
+ * before any component or server helper can call translate().
+ *
+ * D16's two copy rules live here: Public is the PRESELECTED choice (the
+ * reader may switch it to Private), and that choice never rewrites an
+ * existing project — which is why the private note says so rather than
+ * implying a global setting.
+ */
+const CREATE_MESSAGES: Record<Locale, Record<string, string>> = {
+  en: {
+    "projects.create.title": "New project",
+    "projects.create.help":
+      "A project is where a research question, its hypotheses and the evidence that resolves them live. The purpose is required.",
+    "projects.create.name": "Name",
+    "projects.create.address": "Address",
+    "projects.create.addressHint":
+      "Lowercase letters, digits and dashes. This is the project's address and cannot change later.",
+    "projects.create.purpose": "Purpose",
+    "projects.create.purposeHint": "What this project is trying to resolve. Required.",
+    "projects.create.visibility": "Visibility",
+    "projects.create.visibilityPublicNote":
+      "Anyone can read this project and the research state it publishes.",
+    "projects.create.visibilityPrivateNote":
+      "Only members can read this project. This choice does not change any existing project.",
+    "projects.create.organization": "Organization",
+    "projects.create.personal": "Personal project",
+    "projects.create.organizationHint":
+      "Creating inside an organization needs an active membership there; the organization decides who may create projects.",
+    "projects.create.noOrganizations":
+      "You are not an active member of any organization, so this project will be personal.",
+    "projects.create.submit": "Create project",
+    "projects.create.submitting": "Creating…",
+    "projects.create.cancel": "Cancel",
+    "projects.create.required": "This field is required.",
+    "projects.create.invalid": "This value is not in the required form.",
+    "projects.create.created": "Project {slug} created.",
+    "projects.create.failed": "The project could not be created. Please try again.",
+    "projects.create.emptyEntry": "Start your first research project",
+    "projects.create.emptyPath":
+      "A project holds the research question, its hypotheses and the evidence that resolves it — that is the first research path.",
+  },
+  "zh-CN": {
+    // 「公开」是建立时预设的选择，读者可改为「私有」；这个选择不会改写任何
+    // 既有项目，所以私有说明里明确写了这一点，而不是让人以为它是一项全局设置。
+    "projects.create.title": "新建项目",
+    "projects.create.help":
+      "项目容纳研究问题、假设与解决它的证据。研究目的为必填。",
+    "projects.create.name": "名称",
+    "projects.create.address": "地址",
+    "projects.create.addressHint":
+      "小写字母、数字与连字符。这是项目的地址，建立后不可更改。",
+    "projects.create.purpose": "研究目的",
+    "projects.create.purposeHint": "这个项目要解决什么问题。必填。",
+    "projects.create.visibility": "可见性",
+    "projects.create.visibilityPublicNote":
+      "任何人都能阅读此项目及其发布的研究状态。",
+    "projects.create.visibilityPrivateNote":
+      "仅成员可阅读此项目。此选择不会改变任何既有项目。",
+    "projects.create.organization": "组织",
+    "projects.create.personal": "个人项目",
+    "projects.create.organizationHint":
+      "在组织下建立项目需要该组织的有效成员身份；组织政策决定谁可建立项目。",
+    "projects.create.noOrganizations":
+      "你目前不是任何组织的有效成员，因此将建立个人项目。",
+    "projects.create.submit": "建立项目",
+    "projects.create.submitting": "正在建立…",
+    "projects.create.cancel": "取消",
+    "projects.create.required": "此项为必填。",
+    "projects.create.invalid": "该值的格式不正确。",
+    "projects.create.created": "项目 {slug} 已建立。",
+    "projects.create.failed": "无法建立项目，请重试。",
+    "projects.create.emptyEntry": "建立第一个研究项目",
+    "projects.create.emptyPath":
+      "项目容纳研究问题、假设与解决它的证据——这就是第一条研究路径。",
+  },
+};
+
+Object.assign(MESSAGES.en, CREATE_MESSAGES.en);
+Object.assign(MESSAGES["zh-CN"], CREATE_MESSAGES["zh-CN"]);
+
 /** True when `text` is the translator's missing-key output. Exported so the
  *  tests and the browser suite share one definition of "this is a miss"
  *  rather than each matching on the marker string. */

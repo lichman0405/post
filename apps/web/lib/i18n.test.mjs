@@ -220,3 +220,60 @@ test("labels change with the locale while domain codes do not", () => {
   assert.equal(Object.keys(MESSAGES.en).some((k) => k.includes("data-")), false);
   assert.equal(MESSAGES.en["project.space.filesStatus"], "main");
 });
+
+test("the create surface's copy is one block of catalog keys, in both locales", () => {
+  // WEB-04 (D16) puts a form on /projects — a core page, where the scanner's
+  // claim is zero hard-coded literals. That makes these keys structural: a
+  // rename here is a blank label on the page, not a cosmetic edit. The parity
+  // test above already fails a one-sided addition; this pins the SET, so the
+  // form cannot quietly lose a sentence it renders (each one below is read by
+  // app/(main)/projects/project-directory.tsx).
+  const keys = [
+    "projects.create.title",
+    "projects.create.help",
+    "projects.create.name",
+    "projects.create.address",
+    "projects.create.addressHint",
+    "projects.create.purpose",
+    "projects.create.purposeHint",
+    "projects.create.visibility",
+    "projects.create.visibilityPublicNote",
+    "projects.create.visibilityPrivateNote",
+    "projects.create.organization",
+    "projects.create.personal",
+    "projects.create.organizationHint",
+    "projects.create.noOrganizations",
+    "projects.create.submit",
+    "projects.create.submitting",
+    "projects.create.cancel",
+    "projects.create.required",
+    "projects.create.invalid",
+    "projects.create.created",
+    "projects.create.failed",
+    "projects.create.emptyEntry",
+    "projects.create.emptyPath",
+  ];
+  // Read through Maps built from the catalog rather than as MESSAGES[locale]
+  // [key]: the SAST rule set refuses a computed property read on a plain
+  // object by rule, and `locale` is a loop variable here.
+  const catalogs = new Map(
+    Object.entries(MESSAGES).map(([locale, table]) => [locale, new Map(Object.entries(table))]),
+  );
+  for (const key of keys) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key);
+      assert.equal(typeof value, "string", `${locale} is missing ${key}`);
+      assert.notEqual(value.trim(), "", `${locale}:${key} is empty`);
+    }
+  }
+  // The confirmation is sent through the translator with the new address, and
+  // the interpolation must survive in BOTH languages: a "{slug}" lost in
+  // translation makes the sentence name nothing.
+  for (const locale of LOCALES) {
+    const confirmed = catalogs.get(locale)?.get("projects.create.created") ?? "";
+    assert.ok(
+      confirmed.includes("{slug}"),
+      `${locale}:projects.create.created lost its {slug} placeholder`,
+    );
+  }
+});
