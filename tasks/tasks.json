@@ -10787,7 +10787,6 @@
         "apps/web/lib/discussions.test.mjs",
         "apps/web/lib/discussions.ts",
         "cmd/api/discussionhttp/**",
-        "infra/migrations/00159_*.sql",
         "internal/application/discussions/**",
         "internal/persistence/queries/**",
         "internal/persistence/sqlc/**",
@@ -10795,7 +10794,8 @@
         "specs/database/postgres.sql",
         "tests/web-v2/**",
         "apps/web/lib/i18n.ts",
-        "apps/web/lib/i18n.test.mjs"
+        "apps/web/lib/i18n.test.mjs",
+        "infra/migrations/**"
       ],
       "forbidden_scope": [
         ".git/**",
