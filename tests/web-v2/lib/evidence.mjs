@@ -41,6 +41,10 @@ export class Evidence {
     this.webOrigin = options.webOrigin ?? "";
     this.entryUrl = options.entryUrl ?? "";
     this.journeyName = options.journeyName ?? "journey";
+    // Which task slice the journey belongs to. The metadata names it so a
+    // reviewer of a run's evidence can tell the WEB-02 and WEB-03 journeys
+    // apart without guessing from the file path.
+    this.task = options.task ?? "T1302";
     this.accountEmail = options.accountEmail ?? "";
     this.role = options.role ?? "";
     this.expectedSteps = options.expectedSteps ?? [];
@@ -150,7 +154,7 @@ export class Evidence {
     const metadata = {
       harness: "tests/web-v2",
       gate: "G23",
-      task: "T1302",
+      task: this.task,
       runId: this.runId,
       commit: this.commit,
       startedAt: this.startedAt,

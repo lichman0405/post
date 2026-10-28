@@ -22,6 +22,41 @@ journey that is not implemented yet is not added to the blocking run — but
 nothing in this harness is ever reported as passed for a feature that is
 absent.
 
+### The U02 slice (WEB-03, T1304): organizations, members and roles
+
+`journey-u02.mjs` is the G03 slice, driven by three real accounts and three
+isolated browser contexts (so each account has its own cookie jar and its own
+header):
+
+| Step | What the browser does | What is asserted |
+|---|---|---|
+| `open-organizations-signed-out` | opens `/organizations` | the heading renders and the anonymous workspace offers `Sign in` → `/login?next=%2Forganizations` |
+| `signup-owner-a` | follows that entry, switches the `/login` card to create-account mode by its own control, submits | `POST /api/v1/auth/signup` observed, a 200 `GET /auth/session`, the header names the new handle |
+| `create-organization-through-web-form` | fills the page's create form and submits | `POST /api/v1/organizations` → 201, the member page at `/organizations/{slug}/members` shows the new name |
+| `owner-sees-self-as-member` | — | A's own row is `owner` + `active`, and the page's own role badge agrees |
+| `signup-contributor-b` / `signup-viewer-v` | two more contexts establish their own accounts through the product's create-account entry | both sign-ups go through the product's signup endpoint; all three handles differ |
+| `invite-b-as-contributor` / `invite-v-as-viewer` | A invites each handle by hand from the invite form; B is invited with the verified box untouched, V with the owner explicitly checking it | `POST .../members` → 201 for each, the new rows appear with the invited role; the box is asserted unchecked before the first invite, so B is recorded `unverified` (flag `false`, row word `Unverified`) and V — the only deliberately checked path — `verified`; the box is unchecked again after each invite |
+| `viewer-cannot-promote-itself` | V reaches the page through the header's Organizations destination and its Members link, selects `Owner` on its own row and saves | `PATCH .../members/{id}` → **403** `ORG_FORBIDDEN`; the page shows "Only organization owners may perform this action."; the control returns to the stored role; a **reload** still shows `viewer` |
+| `owner-changes-b-role-and-reload-persists` | A changes B to Maintainer, then reloads | `PATCH .../members/{id}` → 200, the row is `maintainer` after the reload, and B's affiliation start date is unchanged |
+| `b-sees-role-change-after-reload` | B navigates there through the product and reloads | B's own role badge and row are `maintainer`, from a 200 member-list read |
+| `viewer-leaves-and-history-is-kept` | V uses its own `Leave organization` control (two clicks) | `DELETE .../members/{id}` → 204, `/organizations` answers V's empty list (no stale row), and A's member list still shows V **ended**, with the role it held (viewer), a `Left <date>` departure date, and no live role control |
+
+"History kept" is checked at the membership record, which is the record this
+slice actually produces: ending an affiliation keeps the row (离职不删除历史,
+docs/04 §6), and the affiliation start date is not rewritten by a role change.
+The leave step measures four things on V's kept row — ended status, the stored
+role, a departure date, and the absence of a live role control; it does not
+compare the affiliation start date (that comparison is asserted on B's row in
+the role-change step). Contribution history belongs to surfaces WEB-03 does
+not build.
+
+The slice's evidence is written to `<run>/u02/` — its own steps record, network
+log, console log, screenshots and trace — and a failure there fails
+`run.sh`. Two console lines are expected and allowed by their own steps only:
+the 401 on `GET /auth/session` from each new context before it has an account,
+and the 403 on the viewer's `PATCH`. The 403 is asserted by status AND by the
+visible sentence, so waiving its console line does not waive the refusal.
+
 ## Run it
 
 ```bash
@@ -168,6 +203,7 @@ tests/web-v2/
   run.sh                 isolated stack + scanner + entry check + journey
   mutation-check.sh      the required red/green proof
   journey.mjs            the U01 browser journey (steps, evidence)
+  journey-u02.mjs        the U02 (WEB-03) journey: org creation, invites, roles, leave
   entrypoint-check.mjs   sign-in form + account-establishment entry pre-flight
   harness/main.go        isolated real API (production auth surface)
   lib/steps.mjs          step accounting (a skipped step fails)
