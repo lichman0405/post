@@ -343,6 +343,62 @@ func TestResearchPageJSONContract(t *testing.T) {
 	}
 }
 
+// TestResearchPageJSONCarriesBranchCoordinates: every JSON node that a web
+// reader can drill down from must carry the as-of branch its version
+// lives on — that coordinate is what turns an outline row into a link.
+// A node whose version has no branch must OMIT the field rather than
+// carry an empty one the web would link to a fabricated coordinate.
+func TestResearchPageJSONCarriesBranchCoordinates(t *testing.T) {
+	out := cannedOutline()
+	// The unresolved external claim has no object and no branch; a child
+	// question exists only in the tree. Both must round-trip honestly.
+	stub := &stubService{outline: out}
+	ts, _, _, _ := newRSGTestServer(t, stub)
+	resp, err := http.Get(ts.URL + researchBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+
+	q1 := payload["questions"].([]any)[0].(map[string]any)
+	if q1["branch_id"] != "branch-1" {
+		t.Errorf("question branch_id = %v, want branch-1", q1["branch_id"])
+	}
+	child := q1["children"].([]any)[0].(map[string]any)
+	if child["branch_id"] != "branch-1" {
+		t.Errorf("child branch_id = %v, want branch-1", child["branch_id"])
+	}
+	hyp := q1["hypotheses"].([]any)[0].(map[string]any)
+	if hyp["branch_id"] != "branch-1" || hyp["object_id"] != "h-1" {
+		t.Errorf("hypothesis ref = %v, want h-1 on branch-1", hyp)
+	}
+	f1 := payload["findings"].([]any)[0].(map[string]any)
+	if f1["branch_id"] != "branch-1" {
+		t.Errorf("finding branch_id = %v, want branch-1", f1["branch_id"])
+	}
+	claims := f1["claims"].([]any)
+	resolvedClaim := claims[0].(map[string]any)
+	if resolvedClaim["branch_id"] != "branch-1" || resolvedClaim["object_id"] != "c-1" {
+		t.Errorf("resolved claim = %v", resolvedClaim)
+	}
+	unresolvedClaim := claims[1].(map[string]any)
+	if _, ok := unresolvedClaim["branch_id"]; ok {
+		t.Errorf("unresolved claim carries branch_id = %v, want the field omitted", unresolvedClaim["branch_id"])
+	}
+	questionRef := f1["questions"].([]any)[0].(map[string]any)
+	if questionRef["branch_id"] != "branch-1" {
+		t.Errorf("finding's question ref = %v, want branch-1", questionRef)
+	}
+	unassigned := payload["unassigned"].([]any)[0].(map[string]any)
+	if unassigned["branch_id"] != "branch-1" {
+		t.Errorf("unassigned ref = %v, want branch-1", unassigned)
+	}
+}
+
 // TestResearchPageEmptyProject: the empty outline renders the empty
 // states, not an error.
 func TestResearchPageEmptyProject(t *testing.T) {
