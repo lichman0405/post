@@ -10487,7 +10487,9 @@
         "cmd/api/rsghttp/**",
         "internal/application/rsg/**",
         "internal/rsg/**",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -10507,7 +10509,7 @@
         "docs/09_VERSION_CONTROL.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "D15：先存草稿、逐步补全；送审/发布前检查完整性。12 类对象逐一验收，不允许单一 happy path 宣称全类型完成。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+      "supervisor_scope_narrowing": "D15：先存草稿、逐步补全；送审/发布前检查完整性。12 类对象逐一验收，不允许单一 happy path 宣称全类型完成。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：本 web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。"
     },
     {
       "id": "T1308",
@@ -10791,7 +10793,9 @@
         "internal/persistence/sqlc/**",
         "specs/SPEC_VERSION.json",
         "specs/database/postgres.sql",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -10810,7 +10814,7 @@
         "docs/42_PAGE_SPECS.md",
         "docs/70_WEB_OPERABILITY_V2_PLAN.md"
       ],
-      "supervisor_scope_narrowing": "移除正式项目的硬编码 MOF Issue 数据。迁移号 00159；缺契约先在任务内补契约，不得用 fixture 冒充真实列表。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。"
+      "supervisor_scope_narrowing": "移除正式项目的硬编码 MOF Issue 数据。迁移号 00159；缺契约先在任务内补契约，不得用 fixture 冒充真实列表。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：本 web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。"
     },
     {
       "id": "T1313",

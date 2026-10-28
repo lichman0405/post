@@ -113,8 +113,13 @@
       "journeys": [
         "U03"
       ],
-      "issue": null,
-      "pull_requests": []
+      "issue": 397,
+      "pull_requests": [
+        398
+      ],
+      "task_issues": {
+        "T1306": 397
+      }
     },
     {
       "web": "WEB-06",

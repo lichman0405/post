@@ -13174,7 +13174,102 @@
       ]
     },
     "T1306": {
-      "status": "todo"
+      "status": "merged",
+      "started_at": "2026-10-28T06:19:10Z",
+      "worker_run_id": "run-2e2aa47cfb5bfd4a",
+      "accepted_by_supervisor_at": "2026-10-28T07:32:51Z",
+      "merged_at": "2026-10-28T07:46:15Z",
+      "rejection_reason": "G2 is green except sast-node; fix these two object-injection findings without\nbaselining or disabling the rule:\n\n  apps/web/app/(main)/projects/[id]/research/research-data.ts:415:15\n  apps/web/app/(main)/projects/[id]/research/research-data.ts:430:15\n  security/detect-object-injection (Variable Assigned to Object Injection Sink)\n\nUse Object.entries / a Map / an explicit allow-list (the pattern used in the\nWEB-02 /status and WEB-03 org fixes). Re-run\n`bash tests/security/sast.sh node` -> 0 unbaselined, plus web typecheck/lint/unit\nand `make web-v2`; record exact outputs in RESULT. Stay in scope.\n",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T05:14:16Z",
+          "run_id": "run-9183b8079771ad9a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T05:14:52Z",
+          "run_id": "run-914919db4fcd2764",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-10-28T05:30:22Z",
+          "run_id": "run-34619588fac6ea02",
+          "reason": "worker exited 1"
+        },
+        {
+          "from": "worker_failed",
+          "to": "ready",
+          "at": "2026-10-28T05:30:44Z",
+          "run_id": "run-e480dbd6ae3544d6"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T05:30:58Z",
+          "run_id": "run-e159ba80c6b4fa72",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-28T05:38:02Z",
+          "run_id": "run-474620d6a2cfe2af",
+          "reason": "collect rejected: scope: 1 changed path(s) outside allowed_scope [apps/web/app/(main)/projects/[id]/research/** apps/web/app/(main)/projects/[[]id]/page.tsx apps/web/app/(main)/projects/[[]id]/tab-placeholder.tsx apps/web/lib/entity-meta.ts apps/web/lib/entity-meta.test.mjs cmd/api/rsghttp/** internal/application/sciobjects/** tests/web-v2/** apps/web/lib/i18n.ts apps/web/lib/i18n.test.mjs]: apps/web/app/(main)/projects/[id]/page.tsx"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T05:38:23Z",
+          "run_id": "run-fd2bb6605bf6d3b8",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T05:41:43Z",
+          "run_id": "run-6420f38f7180e26d",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-28T06:19:09Z",
+          "run_id": "run-2c90a3a1cfdf26e4",
+          "reason": "G2 is green except sast-node; fix these two object-injection findings without\nbaselining or disabling the rule:\n\n  apps/web/app/(main)/projects/[id]/research/research-data.ts:415:15\n  apps/web/app/(main)/projects/[id]/research/research-data.ts:430:15\n  security/detect-object-injection (Variable Assigned to Object Injection Sink)\n\nUse Object.entries / a Map / an explicit allow-list (the pattern used in the\nWEB-02 /status and WEB-03 org fixes). Re-run\n`bash tests/security/sast.sh node` -> 0 unbaselined, plus web typecheck/lint/unit\nand `make web-v2`; record exact outputs in RESULT. Stay in scope.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T06:19:10Z",
+          "run_id": "run-2e2aa47cfb5bfd4a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T06:22:27Z",
+          "run_id": "run-5f77c694338394af",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-28T07:32:51Z",
+          "run_id": "run-b3364249122ffa49"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-28T07:46:15Z",
+          "run_id": "run-035be715c140cd29",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T1307": {
       "status": "todo"
