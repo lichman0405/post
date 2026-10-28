@@ -13272,7 +13272,7 @@
       ]
     },
     "T1307": {
-      "status": "running",
+      "status": "verification",
       "started_at": "2026-10-28T08:30:44Z",
       "worker_run_id": "run-22ac6d97197b0992",
       "history": [
@@ -13308,6 +13308,13 @@
           "at": "2026-10-28T08:30:44Z",
           "run_id": "run-22ac6d97197b0992",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T09:00:23Z",
+          "run_id": "run-3165f2406a8bc5bc",
+          "reason": "collect: all checks passed"
         }
       ]
     },
@@ -13583,7 +13590,46 @@
       "notes": "Issue #387; PR #388. stop (exit 143) -> reject -> respawn -> collect -> three reviews (two request_changes, one approve) -> G1-G4."
     },
     "T1335": {
-      "status": "todo"
+      "status": "merged",
+      "started_at": "2026-10-28T08:31:04Z",
+      "worker_run_id": "run-f76a5cd0424fb27a",
+      "accepted_by_supervisor_at": "2026-10-28T09:32:32Z",
+      "merged_at": "2026-10-28T09:45:40Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T08:31:02Z",
+          "run_id": "run-24834bfb2dc1a330"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T08:31:04Z",
+          "run_id": "run-f76a5cd0424fb27a",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T08:50:35Z",
+          "run_id": "run-c410c7a441294841",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-28T09:32:32Z",
+          "run_id": "run-46db1e65fe7d7516"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-28T09:45:40Z",
+          "run_id": "run-44725733a7b2c453",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     },
     "T1336": {
       "status": "todo"
