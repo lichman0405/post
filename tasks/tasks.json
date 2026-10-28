@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 206,
+  "task_count": 207,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -12123,6 +12123,67 @@
         "docs/72_V2_CLAUDE_CODE_HANDOFF.md"
       ],
       "supervisor_scope_narrowing": "恢复演练由 Supervisor 控制 stop/respawn 的时机；Worker 只写 tests/worker-recovery/**。停 Worker 不是任务失败，而是 WEB-28 要求的受控演练；respawn 后必须重新 collect，不得沿用上一 attempt 的 RESULT。"
+    },
+    {
+      "id": "T1335",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-03 补口：项目成员邀请（owner/maintainer 按 handle 添加现有账号并选角色）",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-03",
+      "dependencies": [
+        "T1304",
+        "T1305"
+      ],
+      "requirements": [
+        "owner/maintainer 在项目 Settings 按 handle 把已有账号加入项目并选择角色；非授权角色被拒。",
+        "后端新增 project membership 创建路径（复用现有角色表与权限矩阵），不新增权限动作或扩大可见性。",
+        "未知 handle、重复成员、非法角色、非成员越权都有明确错误；角色修改沿用现有校验。",
+        "浏览器旅程：A 在 Settings 添加 B；B 登录后在 Home 看到该项目并能打开项目页；B 不能提升自己。"
+      ],
+      "deliverables": [
+        "项目 Settings 成员邀请 UI/API/测试",
+        "tests/web-v2 的成员邀请旅程与证据"
+      ],
+      "acceptance_criteria": [
+        "A 通过网页把 B 加为 Contributor；B 重新登录可见项目；V/非成员不能邀请或提权；历史成员关系不被改写。"
+      ],
+      "tests": [
+        "the owner adds an existing account by handle and the invitee sees the project after login",
+        "a non-owner cannot add or promote a member",
+        "unknown handle, duplicate member and invalid role are explicit field errors"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/projects.ts",
+        "apps/web/lib/projects.test.mjs",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs",
+        "cmd/api/projectshttp/**",
+        "internal/application/projects/**",
+        "internal/persistence/queries/projects.sql",
+        "internal/persistence/sqlc/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "infra/migrations/**",
+        "apps/**（allowed_scope 未点名的一律不许写）",
+        "任何凭据/密钥"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/04_USERS_ROLES.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。"
     }
   ]
 }

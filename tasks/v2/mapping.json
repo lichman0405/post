@@ -72,7 +72,8 @@
     {
       "web": "WEB-03",
       "tasks": [
-        "T1304"
+        "T1304",
+        "T1335"
       ],
       "milestone": "M2",
       "journeys": [

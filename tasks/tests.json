@@ -3020,6 +3020,36 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1335-TEST-01",
+      "task_id": "T1335",
+      "name": "the owner adds an existing account by handle and the invitee sees the project after login",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1335-TEST-02",
+      "task_id": "T1335",
+      "name": "a non-owner cannot add or promote a member",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1335-TEST-03",
+      "task_id": "T1335",
+      "name": "unknown handle, duplicate member and invalid role are explicit field errors",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

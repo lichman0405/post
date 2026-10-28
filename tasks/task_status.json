@@ -13272,7 +13272,31 @@
       ]
     },
     "T1307": {
-      "status": "todo"
+      "status": "worker_failed",
+      "started_at": "2026-10-28T07:46:31Z",
+      "worker_run_id": "run-7774514179605a38",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T07:46:27Z",
+          "run_id": "run-8641bece6cea1f19"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T07:46:31Z",
+          "run_id": "run-7774514179605a38",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "worker_failed",
+          "at": "2026-10-28T08:08:29Z",
+          "run_id": "run-98f230e924c3dafa",
+          "reason": "worker exited 1"
+        }
+      ]
     },
     "T1308": {
       "status": "todo"
@@ -13287,7 +13311,32 @@
       "status": "todo"
     },
     "T1312": {
-      "status": "todo"
+      "status": "rejected",
+      "started_at": "2026-10-28T07:46:54Z",
+      "worker_run_id": "run-a92b13c6efd61ebb",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T07:46:32Z",
+          "run_id": "run-aadc6d5fb45f2b8a"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T07:46:54Z",
+          "run_id": "run-a92b13c6efd61ebb",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-28T07:58:24Z",
+          "run_id": "run-45e77905fcc9069f",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        }
+      ]
     },
     "T1313": {
       "status": "todo"
@@ -13519,6 +13568,9 @@
       ],
       "completed_at": "2026-10-26T14:07:19Z",
       "notes": "Issue #387; PR #388. stop (exit 143) -> reject -> respawn -> collect -> three reviews (two request_changes, one approve) -> G1-G4."
+    },
+    "T1335": {
+      "status": "todo"
     }
   },
   "version": 2
