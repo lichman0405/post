@@ -60,8 +60,13 @@ type researchCountsPayload struct {
 }
 
 type researchQuestionPayload struct {
-	ObjectID         string                    `json:"object_id"`
-	VersionID        string                    `json:"version_id"`
+	ObjectID  string `json:"object_id"`
+	VersionID string `json:"version_id"`
+	// BranchID is the as-of version's branch: the coordinate a reader's
+	// object page needs. Empty when the version carries no branch, and the
+	// web list then renders the title without a link (the same rule the
+	// server-rendered research page follows — never fabricate a coordinate).
+	BranchID         string                    `json:"branch_id,omitempty"`
 	Title            string                    `json:"title"`
 	Statement        string                    `json:"statement"`
 	QuestionState    string                    `json:"question_state"`
@@ -75,6 +80,7 @@ type researchQuestionPayload struct {
 type researchFindingPayload struct {
 	ObjectID    string                 `json:"object_id"`
 	VersionID   string                 `json:"version_id"`
+	BranchID    string                 `json:"branch_id,omitempty"`
 	Title       string                 `json:"title"`
 	Statement   string                 `json:"statement"`
 	FindingType string                 `json:"finding_type"`
@@ -86,13 +92,18 @@ type researchFindingPayload struct {
 type researchClaimPayload struct {
 	ObjectID  string `json:"object_id,omitempty"`
 	VersionID string `json:"version_id"`
-	Title     string `json:"title"`
-	Resolved  bool   `json:"resolved"`
+	// BranchID is the resolved claim object's as-of branch; empty when the
+	// claim version does not resolve to an object of this project (the row
+	// then has no drill-down link).
+	BranchID string `json:"branch_id,omitempty"`
+	Title    string `json:"title"`
+	Resolved bool   `json:"resolved"`
 }
 
 type researchRefPayload struct {
 	ObjectID   string `json:"object_id"`
 	ObjectType string `json:"object_type"`
+	BranchID   string `json:"branch_id,omitempty"`
 	Title      string `json:"title"`
 }
 
@@ -145,6 +156,7 @@ func researchQuestionPayloadFrom(q rsg.OutlineQuestion) researchQuestionPayload 
 	p := researchQuestionPayload{
 		ObjectID:         q.ObjectID,
 		VersionID:        q.VersionID,
+		BranchID:         q.BranchID,
 		Title:            q.Title,
 		Statement:        q.Statement,
 		QuestionState:    q.QuestionState,
@@ -173,6 +185,7 @@ func researchFindingPayloadFrom(f rsg.OutlineFinding) researchFindingPayload {
 	p := researchFindingPayload{
 		ObjectID:    f.ObjectID,
 		VersionID:   f.VersionID,
+		BranchID:    f.BranchID,
 		Title:       f.Title,
 		Statement:   f.Statement,
 		FindingType: f.FindingType,
@@ -182,7 +195,7 @@ func researchFindingPayloadFrom(f rsg.OutlineFinding) researchFindingPayload {
 	}
 	for _, c := range f.Claims {
 		p.Claims = append(p.Claims, researchClaimPayload{
-			ObjectID: c.ObjectID, VersionID: c.VersionID, Title: c.Title, Resolved: c.Resolved,
+			ObjectID: c.ObjectID, VersionID: c.VersionID, BranchID: c.BranchID, Title: c.Title, Resolved: c.Resolved,
 		})
 	}
 	for _, ref := range f.Questions {
@@ -192,7 +205,7 @@ func researchFindingPayloadFrom(f rsg.OutlineFinding) researchFindingPayload {
 }
 
 func researchRefPayloadFrom(ref rsg.OutlineObjectRef) researchRefPayload {
-	return researchRefPayload{ObjectID: ref.ObjectID, ObjectType: ref.ObjectType, Title: ref.Title}
+	return researchRefPayload{ObjectID: ref.ObjectID, ObjectType: ref.ObjectType, BranchID: ref.BranchID, Title: ref.Title}
 }
 
 // handleResearchPage renders the research page for browser requests.

@@ -1363,6 +1363,149 @@ const CREATE_MESSAGES: Record<Locale, Record<string, string>> = {
 Object.assign(MESSAGES.en, CREATE_MESSAGES.en);
 Object.assign(MESSAGES["zh-CN"], CREATE_MESSAGES["zh-CN"]);
 
+/*
+ * WEB-05 (G06) research-browse copy: the research map, the outline list and
+ * the object detail page.
+ *
+ * Appended after the translator for the same reason as the create block
+ * above: the SAST baseline records findings by `path:line:column`, so
+ * inserting these keys inside the two big locale literals would move
+ * translate() and every reviewed lookup below it to new lines without
+ * changing a byte of code.
+ *
+ * The object-type and relation keys are written out (not derived) and use
+ * hyphens instead of the domain codes' underscores, because catalog keys may
+ * not contain underscores — the shape test in lib/i18n.test.mjs is what
+ * makes that a rule rather than a habit. The domain code itself stays
+ * untranslated in `data-object-type` and friends (docs/28 §3).
+ */
+const RESEARCH_BROWSE_MESSAGES: Record<Locale, Record<string, string>> = {
+  en: {
+    "research.project": "Project",
+    "research.viewLabel": "Outline view",
+    "research.view.questions": "By question",
+    "research.view.findings": "By finding",
+    "research.map.label": "Research map",
+    "research.map.eyebrow": "Research map",
+    "research.map.title": "How the objects connect",
+    "research.map.note":
+      "One lane per object type. Each object names the outline edges it takes part in; the map and the list below hold exactly the same objects.",
+    "research.list.label": "Research outline",
+    "research.list.eyebrow": "Outline",
+    "research.list.title": "Every object in this view",
+    "research.list.note": "The same objects as the map, in outline order.",
+    "research.row.open": "Open {title}",
+    "research.type.research-question": "Question",
+    "research.type.hypothesis": "Hypothesis",
+    "research.type.experiment": "Experiment",
+    "research.type.finding": "Finding",
+    "research.type.claim": "Claim",
+    "research.type.material": "Material",
+    "research.type.dataset": "Dataset",
+    "research.type.protocol": "Protocol",
+    "research.type.sample": "Sample",
+    "research.type.calculation": "Calculation",
+    "research.type.external-reference": "External reference",
+    "research.relation.addresses-question": "addresses question",
+    "research.relation.parent-question-of": "has sub-question",
+    "research.relation.cites-claim": "cites claim",
+    "research.relation.cited-by-finding": "cited by finding",
+    "research.relation.addressed-by-finding": "addressed by finding",
+    "research.relation.outgoing": "outgoing",
+    "research.relation.incoming": "incoming",
+    "research.object.breadcrumb": "Object breadcrumb",
+    "research.object.backToResearch": "Back to the research outline",
+    "research.object.backToObject": "Back to {title}",
+    "research.object.selectedVersion": "Selected version",
+    "research.object.ofVersions": "of {count}",
+    "research.object.versions": "Version history",
+    "research.object.versionsEyebrow": "Immutable versions",
+    "research.object.versionsNote":
+      "Every version keeps its own content. Selecting one shows that version as it was stored, not the object as it stands today.",
+    "research.object.versionOption": "Version {version}",
+    "research.object.current": "current",
+    "research.object.fields": "Fields",
+    "research.object.fieldsEyebrow": "This version",
+    "research.object.fieldsNote": "The stored payload of version {version}.",
+    "research.object.emptyValue": "not set",
+    "research.object.relations": "Relations",
+    "research.object.relationsEyebrow": "Connections",
+    "research.object.relationsNote":
+      "Follow a relation to the object at its other end. An object the outline does not place is shown as text, never as a fabricated link.",
+    "research.object.noRelations": "This object takes part in no relation yet.",
+    "research.object.notFound.title": "Object not found",
+    "research.object.notFound.body":
+      "This object is not part of the research outline you may read.",
+    "research.object.versionInvalid.title": "Version not understood",
+    "research.object.versionInvalid.body":
+      "A version has to be a positive whole number. Go back to the version history and choose a version.",
+  },
+  "zh-CN": {
+    // 目录键用小写连字符而非领域 code 的下划线：键形规则不允许下划线，
+    // 领域 code 本身在 data-* 属性与数据里保持原样、不翻译（docs/28 §3）。
+    "research.project": "项目",
+    "research.viewLabel": "大纲视图",
+    "research.view.questions": "按研究问题",
+    "research.view.findings": "按结论",
+    "research.map.label": "研究图谱",
+    "research.map.eyebrow": "研究图谱",
+    "research.map.title": "对象之间如何连接",
+    "research.map.note":
+      "每种对象类型一条泳道。每个对象列出它参与的大纲连线；上方图谱与下方列表包含完全相同的对象。",
+    "research.list.label": "研究大纲",
+    "research.list.eyebrow": "大纲",
+    "research.list.title": "此视图中的全部对象",
+    "research.list.note": "与图谱相同的对象，按大纲顺序排列。",
+    "research.row.open": "打开 {title}",
+    "research.type.research-question": "研究问题",
+    "research.type.hypothesis": "假设",
+    "research.type.experiment": "实验",
+    "research.type.finding": "结论",
+    "research.type.claim": "主张",
+    "research.type.material": "材料",
+    "research.type.dataset": "数据集",
+    "research.type.protocol": "实验方案",
+    "research.type.sample": "样品",
+    "research.type.calculation": "计算",
+    "research.type.external-reference": "外部引用",
+    "research.relation.addresses-question": "针对研究问题",
+    "research.relation.parent-question-of": "包含子问题",
+    "research.relation.cites-claim": "引用主张",
+    "research.relation.cited-by-finding": "被结论引用",
+    "research.relation.addressed-by-finding": "被结论回应",
+    "research.relation.outgoing": "出向",
+    "research.relation.incoming": "入向",
+    "research.object.breadcrumb": "对象面包屑",
+    "research.object.backToResearch": "返回研究大纲",
+    "research.object.backToObject": "返回 {title}",
+    "research.object.selectedVersion": "所选版本",
+    "research.object.ofVersions": "共 {count} 个",
+    "research.object.versions": "版本历史",
+    "research.object.versionsEyebrow": "不可变版本",
+    "research.object.versionsNote":
+      "每个版本保留自己的内容。选择某个版本，看到的是它当时存下的样子，而不是对象今天的现状。",
+    "research.object.versionOption": "版本 {version}",
+    "research.object.current": "当前",
+    "research.object.fields": "字段",
+    "research.object.fieldsEyebrow": "本版本",
+    "research.object.fieldsNote": "版本 {version} 存储的载荷。",
+    "research.object.emptyValue": "未设置",
+    "research.object.relations": "关联",
+    "research.object.relationsEyebrow": "连接",
+    "research.object.relationsNote":
+      "可沿关联前往另一端的对象。大纲中未给出坐标的对象以文字呈现，不伪造链接。",
+    "research.object.noRelations": "此对象目前不参与任何关联。",
+    "research.object.notFound.title": "未找到对象",
+    "research.object.notFound.body": "此对象不属于你可阅读的研究大纲。",
+    "research.object.versionInvalid.title": "无法识别版本",
+    "research.object.versionInvalid.body":
+      "版本必须是正整数。请返回版本历史并选择一个版本。",
+  },
+};
+
+Object.assign(MESSAGES.en, RESEARCH_BROWSE_MESSAGES.en);
+Object.assign(MESSAGES["zh-CN"], RESEARCH_BROWSE_MESSAGES["zh-CN"]);
+
 /** True when `text` is the translator's missing-key output. Exported so the
  *  tests and the browser suite share one definition of "this is a miss"
  *  rather than each matching on the marker string. */

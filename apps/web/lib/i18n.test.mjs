@@ -277,3 +277,96 @@ test("the create surface's copy is one block of catalog keys, in both locales", 
     );
   }
 });
+
+test("the research-browse copy is one block of catalog keys, in both locales", () => {
+  // WEB-05 (G06) puts the research map, the outline list and the object page
+  // in front of a reader. Their copy is one appended block in lib/i18n.ts;
+  // this pins the SET, so a key renamed on one side of the catalog cannot
+  // leave a blank label on a page that renders it.
+  const keys = [
+    "research.project",
+    "research.viewLabel",
+    "research.view.questions",
+    "research.view.findings",
+    "research.map.label",
+    "research.map.eyebrow",
+    "research.map.title",
+    "research.map.note",
+    "research.list.label",
+    "research.list.eyebrow",
+    "research.list.title",
+    "research.list.note",
+    "research.row.open",
+    "research.type.research-question",
+    "research.type.hypothesis",
+    "research.type.experiment",
+    "research.type.finding",
+    "research.type.claim",
+    "research.type.material",
+    "research.type.dataset",
+    "research.type.protocol",
+    "research.type.sample",
+    "research.type.calculation",
+    "research.type.external-reference",
+    "research.relation.addresses-question",
+    "research.relation.parent-question-of",
+    "research.relation.cites-claim",
+    "research.relation.cited-by-finding",
+    "research.relation.addressed-by-finding",
+    "research.relation.outgoing",
+    "research.relation.incoming",
+    "research.object.breadcrumb",
+    "research.object.backToResearch",
+    "research.object.backToObject",
+    "research.object.selectedVersion",
+    "research.object.ofVersions",
+    "research.object.versions",
+    "research.object.versionsEyebrow",
+    "research.object.versionsNote",
+    "research.object.versionOption",
+    "research.object.current",
+    "research.object.fields",
+    "research.object.fieldsEyebrow",
+    "research.object.fieldsNote",
+    "research.object.emptyValue",
+    "research.object.relations",
+    "research.object.relationsEyebrow",
+    "research.object.relationsNote",
+    "research.object.noRelations",
+    "research.object.notFound.title",
+    "research.object.notFound.body",
+    "research.object.versionInvalid.title",
+    "research.object.versionInvalid.body",
+  ];
+  const catalogs = new Map(
+    Object.entries(MESSAGES).map(([locale, table]) => [locale, new Map(Object.entries(table))]),
+  );
+  for (const key of keys) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key);
+      assert.equal(typeof value, "string", `${locale} is missing ${key}`);
+      assert.notEqual(value.trim(), "", `${locale}:${key} is empty`);
+      // Catalog keys may not carry the domain codes' underscores: the key
+      // shape test above admits hyphens only, and a page that built a key
+      // from an object type would otherwise render a visible miss marker.
+      assert.equal(key.includes("_"), false, `${key} uses an underscore`);
+    }
+  }
+  // The sentences that name an object, a version or a count interpolate a
+  // value; a placeholder lost in either language names nothing.
+  const placeholders = [
+    ["research.row.open", ["{title}"]],
+    ["research.object.backToObject", ["{title}"]],
+    ["research.object.ofVersions", ["{count}"]],
+    ["research.object.versionOption", ["{version}"]],
+    ["research.object.fieldsNote", ["{version}"]],
+  ];
+  for (const [key, names] of placeholders) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key) ?? "";
+      for (const name of names) {
+        assert.ok(value.includes(name), `${locale}:${key} lost ${name}`);
+      }
+    }
+  }
+});

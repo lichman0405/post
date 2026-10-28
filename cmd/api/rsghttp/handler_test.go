@@ -420,6 +420,182 @@ func TestGetObjectHappyPath(t *testing.T) {
 	}
 }
 
+// TestGetObjectDetailJSONOnRequest pins the browse surface's read (WEB-05):
+// the SAME object route answers the version log and the relations when the
+// caller asks for them, so a reader can walk versions and follow relations
+// without a second endpoint (and without reading API URLs). The default
+// payload above stays the cheap single-version read.
+func TestGetObjectDetailJSONOnRequest(t *testing.T) {
+	stub := &stubService{detail: cannedDetail()}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + objectsBase + "/objects/obj-1?include=versions,relations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	// The detail representation shares the URL with the page and the plain
+	// read; shared caches must key on Accept.
+	if vary := resp.Header.Get("Vary"); !strings.Contains(vary, "Accept") {
+		t.Errorf("Vary = %q, want Accept listed", vary)
+	}
+	payload := decodePayload(t, resp)
+
+	// The selected version's own facts stay where every object payload keeps
+	// them — a client that knows one shape reads both.
+	if payload["id"] != "obj-1" || payload["version_id"] != "ver-2" || payload["version_no"] != float64(2) ||
+		payload["title"] != "MOF-5 refined" {
+		t.Errorf("selected version payload = %v", payload)
+	}
+	if payload["project_slug"] != "rsg-project" || payload["project_name"] != "RSG Project" ||
+		payload["branch_id"] != "branch-1" || payload["branch_name"] != "main" {
+		t.Errorf("project/branch facts = %v", payload)
+	}
+	if payload["selected_version_no"] != float64(2) {
+		t.Errorf("selected_version_no = %v, want 2", payload["selected_version_no"])
+	}
+
+	versions, ok := payload["versions"].([]any)
+	if !ok || len(versions) != 2 {
+		t.Fatalf("versions = %v, want the two-version log", payload["versions"])
+	}
+	v1 := versions[0].(map[string]any)
+	v2 := versions[1].(map[string]any)
+	if v1["version_id"] != "ver-1" || v1["version_no"] != float64(1) || v1["title"] != "MOF-5" {
+		t.Errorf("v1 = %v", v1)
+	}
+	if v1["current"] != false || v2["current"] != true {
+		t.Errorf("current flags = %v/%v, want false/true (the head is version 2)", v1["current"], v2["current"])
+	}
+	// Each version carries its own payload: a reader selecting an old version
+	// must see that version's content, not the head's.
+	if v1Payload, ok := v1["payload"].(map[string]any); !ok || v1Payload["formula"] != nil {
+		t.Errorf("v1 payload = %v, want the version-1 content only", v1["payload"])
+	}
+
+	relations, ok := payload["relations"].([]any)
+	if !ok || len(relations) != 1 {
+		t.Fatalf("relations = %v, want one", payload["relations"])
+	}
+	rel := relations[0].(map[string]any)
+	if rel["relation_type"] != "derived_from" || rel["direction"] != "outgoing" ||
+		rel["other_object_id"] != "obj-9" || rel["other_object_type"] != "dataset" || rel["other_title"] != "isotherm series" {
+		t.Errorf("relation = %v", rel)
+	}
+
+	// The detail read must not also run the cheap read.
+	if stub.getObjectCalls != 0 || stub.getObjectDetailCalls != 1 {
+		t.Errorf("calls = get %d / detail %d, want 0/1", stub.getObjectCalls, stub.getObjectDetailCalls)
+	}
+	if stub.lastVersionNo != nil {
+		t.Errorf("version = %v, want nil (latest) when no selector is sent", *stub.lastVersionNo)
+	}
+}
+
+// TestGetObjectDetailJSONSelectsRequestedVersion: ?version=N is passed
+// through to the service untouched, and the payload renders the version
+// that came back — never the head.
+func TestGetObjectDetailJSONSelectsRequestedVersion(t *testing.T) {
+	detail := cannedDetail()
+	detail.Selected = detail.Versions[0] // ver-1
+	stub := &stubService{detail: detail}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + objectsBase + "/objects/obj-1?version=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if payload["version_id"] != "ver-1" || payload["version_no"] != float64(1) || payload["title"] != "MOF-5" {
+		t.Errorf("payload = %v, want version 1 selected", payload)
+	}
+	if stub.lastVersionNo == nil || *stub.lastVersionNo != 1 {
+		t.Fatalf("version = %v, want 1", stub.lastVersionNo)
+	}
+}
+
+// TestGetObjectDetailJSONRejectsBadVersion: a version selector that is not
+// a positive integer is refused on the wire. Treating it as "latest" would
+// silently show a reader a different version than the one they asked for.
+func TestGetObjectDetailJSONRejectsBadVersion(t *testing.T) {
+	for _, query := range []string{"?version=abc", "?version=0", "?version=-2", "?version=1.5"} {
+		stub := &stubService{detail: cannedDetail()}
+		ts, authed, _, _ := newRSGTestServer(t, stub)
+		resp, err := authed.Get(ts.URL + objectsBase + "/objects/obj-1" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", query, resp.StatusCode)
+		}
+		if envelope := decodeError(t, resp); envelope.Code != rsg.CodeValidation {
+			t.Errorf("%s: code = %q, want %q", query, envelope.Code, rsg.CodeValidation)
+		}
+		if stub.getObjectDetailCalls != 0 || stub.getObjectCalls != 0 {
+			t.Errorf("%s: service called (detail %d, read %d) on a bad selector", query, stub.getObjectDetailCalls, stub.getObjectCalls)
+		}
+	}
+}
+
+// TestGetObjectDetailJSONClassifiesIncomingRelations: a relation whose
+// OTHER endpoint is the one this object's version does not hold is
+// incoming, and the other endpoint rendered is the source — not a guess.
+func TestGetObjectDetailJSONClassifiesIncomingRelations(t *testing.T) {
+	detail := cannedDetail()
+	detail.Relations[0].Relation.SourceObjectVersionID = "ver-9"
+	detail.Relations[0].Relation.TargetObjectVersionID = "ver-2"
+	detail.Relations[0].Source = rsg.ObjectRelationEndpoint{ObjectID: "obj-9", ObjectType: "dataset", Title: "isotherm series"}
+	detail.Relations[0].Target = rsg.ObjectRelationEndpoint{ObjectID: "obj-1", ObjectType: "material", Title: "MOF-5 refined"}
+	stub := &stubService{detail: detail}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + objectsBase + "/objects/obj-1?include=relations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	relations, ok := decodePayload(t, resp)["relations"].([]any)
+	if !ok || len(relations) != 1 {
+		t.Fatalf("relations = %v", relations)
+	}
+	rel := relations[0].(map[string]any)
+	if rel["direction"] != "incoming" || rel["other_object_id"] != "obj-9" || rel["other_object_type"] != "dataset" {
+		t.Errorf("relation = %v, want incoming from obj-9", rel)
+	}
+}
+
+// TestGetObjectJSONIgnoresUnknownInclude: an include value this surface
+// does not serve must not switch the read to the detail shape — the
+// default payload is what every existing consumer parses.
+func TestGetObjectJSONIgnoresUnknownInclude(t *testing.T) {
+	stub := &stubService{object: cannedObject()}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + objectsBase + "/objects/obj-1?include=files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	for _, unwanted := range []string{"versions", "relations", "branch_id", "selected_version_no"} {
+		if _, ok := payload[unwanted]; ok {
+			t.Errorf("default payload gained %q: %v", unwanted, payload)
+		}
+	}
+	if stub.getObjectCalls != 1 || stub.getObjectDetailCalls != 0 {
+		t.Errorf("calls = read %d / detail %d, want 1/0", stub.getObjectCalls, stub.getObjectDetailCalls)
+	}
+}
+
 const evidenceAssertionsBase = objectsBase + "/evidence-assertions"
 
 // cannedEvidenceAssertion is one stored assertion as the store returns it:

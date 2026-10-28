@@ -7,16 +7,25 @@
 // the session/CSRF guard and its CORS allow-list. The only difference from
 // cmd/api is what it deliberately does NOT do:
 //
-//   - it seeds no accounts. The first account in the journey is created by
-//     the browser through the product's own /login sign-up form; a harness
-//     that pre-created it through HTTP or SQL would make the login journey
-//     prove nothing (docs/70 §6.2).
-//   - it seeds no projects, membership or other business state.
-//   - it serves the auth surface, the project read surface and /healthz +
-//     /readyz. T1303 (WEB-02) needs the home workbench to list the signed-in
-//     account's projects, so the production project API is mounted over the
-//     same real database; later journey slices mount their own product
-//     surfaces here as the features land.
+//   - it seeds no account for the journeys that CREATE one. The first
+//     account in those journeys is created by the browser through the
+//     product's own /login sign-up form; a harness that pre-created it
+//     through HTTP or SQL would make the login journey prove nothing
+//     (docs/70 §6.2).
+//   - its ONE seeded fixture is the WEB-05 browse project (fixture.go): the
+//     research map, the outline list and the object page read research state
+//     that no web surface can author yet, and docs/70 §6.3 allows a
+//     synthetic seed for exactly that. It is PRIVATE, so it is exactly as
+//     visible as its one member and cannot alter another journey's directory;
+//     the journey signs that member in through the real /login form. The
+//     fixture proves no creation step.
+//   - it serves the auth surface, the project read surface, the scientific
+//     object surface (the research outline, the object detail and the object
+//     page's content negotiation) and /healthz + /readyz. T1303 (WEB-02)
+//     needs the home workbench to list the signed-in account's projects, so
+//     the production project API is mounted over the same real database;
+//     later journey slices mount their own product surfaces here as the
+//     features land.
 //
 // Isolation: every run creates its own database `webv2_<task>_<run id>`,
 // migrates it, and drops it on exit. Redis sessions are issued random
@@ -58,9 +67,17 @@ import (
 	"github.com/lichman0405/post/cmd/api/orgshttp"
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
+	"github.com/lichman0405/post/cmd/api/rsghttp"
 	"github.com/lichman0405/post/internal/application/authn"
+	"github.com/lichman0405/post/internal/application/branches"
+	"github.com/lichman0405/post/internal/application/rsg"
+	"github.com/lichman0405/post/internal/application/states"
+	appvalidation "github.com/lichman0405/post/internal/application/validation"
 	"github.com/lichman0405/post/internal/authz"
+	"github.com/lichman0405/post/internal/events"
 	"github.com/lichman0405/post/internal/persistence"
+	"github.com/lichman0405/post/internal/rsg/schemareg"
+	rsgvalidation "github.com/lichman0405/post/internal/rsg/validation"
 )
 
 const (
@@ -86,6 +103,12 @@ type ready struct {
 	RedisDB    int    `json:"redis_db"`
 	StartedAt  string `json:"started_at"`
 	HarnessPID int    `json:"harness_pid"`
+	// Web05ProjectSlug names the browse fixture this run seeded, so a
+	// reviewer reading the run record can tell which project the screenshots
+	// show. The account's address is deliberately absent: the READY line is
+	// copied into the evidence, and the evidence must not record credentials
+	// (docs/70 §6.4).
+	Web05ProjectSlug string `json:"web05_project_slug,omitempty"`
 }
 
 func main() {
@@ -125,6 +148,11 @@ type config struct {
 	runID     string
 	commit    string
 	addr      string
+	// The WEB-05 fixture owner's credentials. Both sides derive the same
+	// values from the run id, so the values are per-run, synthetic, and never
+	// a constant someone could sign in with against another run's database.
+	web05Email    string
+	web05Password string
 }
 
 func loadConfig() (config, error) {
@@ -156,6 +184,12 @@ func loadConfig() (config, error) {
 		}
 		c.runID = time.Now().UTC().Format("20060102T150405Z") + "-" + id
 	}
+	// The WEB-05 fixture's synthetic credentials, derived from the run id the
+	// same way journey-web05.mjs derives them. Env overrides exist for a
+	// hand-driven run; the runner sets both sides from one run id.
+	c.web05Email = envDefault("WEB_V2_WEB05_EMAIL",
+		"webv2-web05-"+strings.ToLower(c.runID)+"@example.test")
+	c.web05Password = envDefault("WEB_V2_WEB05_PASSWORD", "webv2-synthetic-"+c.runID+"-password")
 	adminURL, err := url.Parse(c.adminURL)
 	if err != nil {
 		// url.Parse errors quote the input, password included; report the
@@ -305,6 +339,41 @@ func run(ctx context.Context, cfg config) error {
 	})
 	profileAPI.Register(mux)
 
+	// The scientific-object surface (T1306 / WEB-05): the research outline,
+	// the object detail read (with its version log and resolved relations)
+	// and the object page's HTML/JSON content negotiation, composed exactly
+	// as cmd/api composes it — the schema registry, the ONE state-commit
+	// service every RSG write lands through, and the production matrix.
+	// rsghttp's two optional graph readers stay nil: this harness serves no
+	// provenance or evidence tab, and the surface's contract is that an
+	// unwired reader says the graph could not be read — never that it is
+	// empty (rsghttp.Deps).
+	reg, err := schemareg.New()
+	if err != nil {
+		return fmt.Errorf("load the schema registry: %w", err)
+	}
+	stateStore := persistence.NewStateStore(pool)
+	rsgSvc := rsg.NewService(rsg.Deps{
+		Projects:  projectAPI.Service(),
+		Branches:  branches.NewService(persistence.NewBranchStore(pool)),
+		States:    states.NewService(stateStore, appvalidation.NewGuard(rsgvalidation.NewValidator(reg), persistence.NewValidationTxProbe())),
+		Latest:    stateStore,
+		Objects:   persistence.NewScientificObjectStore(pool),
+		Relations: persistence.NewRelationStore(pool),
+		Queries:   persistence.NewRSGQueryStore(pool),
+		Profiles:  persistence.NewProfileStore(pool),
+		Authz:     authz.NewMatrixEngine(),
+		Schemas:   reg,
+		Events:    events.Recorder{},
+	})
+	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
+	rsgAPI.Register(mux)
+
+	fixture, err := seedWeb05(ctx, pool, projectAPI.Service(), rsgSvc, cfg.web05Email, cfg.web05Password)
+	if err != nil {
+		return fmt.Errorf("seed the WEB-05 browse fixture: %w", err)
+	}
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"service": "post-api",
@@ -350,16 +419,17 @@ func run(ctx context.Context, cfg config) error {
 
 	origin := "http://" + listener.Addr().String()
 	line := ready{
-		RunID:      cfg.runID,
-		Task:       harnessTaskID,
-		Commit:     cfg.commit,
-		APIOrigin:  origin,
-		WebOrigin:  cfg.webOrigin,
-		Database:   name,
-		RedisAddr:  cfg.redisAddr,
-		RedisDB:    cfg.redisDB,
-		StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-		HarnessPID: os.Getpid(),
+		RunID:            cfg.runID,
+		Task:             harnessTaskID,
+		Commit:           cfg.commit,
+		APIOrigin:        origin,
+		WebOrigin:        cfg.webOrigin,
+		Database:         name,
+		RedisAddr:        cfg.redisAddr,
+		RedisDB:          cfg.redisDB,
+		StartedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+		HarnessPID:       os.Getpid(),
+		Web05ProjectSlug: fixture.ProjectSlug,
 	}
 	blob, err := json.Marshal(line)
 	if err != nil {

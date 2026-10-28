@@ -390,9 +390,21 @@ func evidenceAssertionPayloadFromResult(res rsg.EvidenceAssertionResult) evidenc
 // hidden for everyone who may not see it. Browser navigations (Accept:
 // text/html) get the read-only detail page (T0210); every other client
 // gets the JSON contract.
+//
+// The default JSON body is the single object + its selected version, the
+// shape every existing consumer reads. A browse surface (WEB-05) also
+// needs the version log and the relations to offer version selection and
+// related navigation, so the SAME route answers the detail shape when the
+// caller asks for it — `?include=versions,relations` — or names a version
+// (`?version=N`). Opt-in rather than always-on keeps the cheap read cheap
+// and the existing payload byte-compatible.
 func (h *handlers) handleGetObject(w http.ResponseWriter, r *http.Request) {
 	if wantsHTML(r) {
 		h.handleObjectDetailPage(w, r)
+		return
+	}
+	if objectReadWantsDetail(r) {
+		h.handleObjectDetailJSON(w, r)
 		return
 	}
 	res, err := h.svc.GetObject(r.Context(), reader(r), r.PathValue("projectId"), r.PathValue("branchId"), r.PathValue("objectId"))
@@ -401,6 +413,175 @@ func (h *handlers) handleGetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authhttp.WriteJSON(w, http.StatusOK, objectPayloadFromResult(res))
+}
+
+// objectReadWantsDetail reports whether the caller asked for the detail
+// shape (the version log and relations) rather than the single-version
+// object payload. Both spellings are accepted: `include` names the extra
+// collections, and a `version` parameter necessarily needs the version log
+// to say which version is selected.
+func objectReadWantsDetail(r *http.Request) bool {
+	q := r.URL.Query()
+	if q.Get("version") != "" {
+		return true
+	}
+	for _, part := range strings.Split(q.Get("include"), ",") {
+		switch strings.TrimSpace(part) {
+		case "versions", "relations":
+			return true
+		}
+	}
+	return false
+}
+
+// objectVersionQuery parses the browse surface's ?version= selector. A
+// missing value selects the latest version; a value that is not a positive
+// integer is refused on the wire rather than silently treated as latest —
+// a reader who asked for a version must never be shown a different one.
+func objectVersionQuery(w http.ResponseWriter, r *http.Request) (*int, bool) {
+	raw := r.URL.Query().Get("version")
+	if raw == "" {
+		return nil, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		authhttp.WriteError(w, r, http.StatusBadRequest, rsg.CodeValidation,
+			"version must be a positive integer")
+		return nil, false
+	}
+	return &n, true
+}
+
+// handleObjectDetailJSON answers the detail shape: the object, every
+// version (oldest first), the selected version's content, and the
+// relations incident to the object with both endpoints resolved.
+func (h *handlers) handleObjectDetailJSON(w http.ResponseWriter, r *http.Request) {
+	versionNo, ok := objectVersionQuery(w, r)
+	if !ok {
+		return
+	}
+	detail, err := h.svc.GetObjectDetail(r.Context(), reader(r),
+		r.PathValue("projectId"), r.PathValue("branchId"), r.PathValue("objectId"), versionNo)
+	if err != nil {
+		rsgError(w, r, err)
+		return
+	}
+	// The same URL serves the page and the JSON contract; shared caches
+	// must key on Accept so the two never cross-serve.
+	w.Header().Add("Vary", "Accept")
+	authhttp.WriteJSON(w, http.StatusOK, objectDetailPayloadFrom(detail))
+}
+
+// objectVersionPayload is one immutable version row of the detail read.
+type objectVersionPayload struct {
+	VersionID      string           `json:"version_id"`
+	VersionNo      int              `json:"version_no"`
+	StateID        string           `json:"state_id"`
+	Title          string           `json:"title"`
+	LifecycleState string           `json:"lifecycle_state"`
+	SchemaRef      schemaRefPayload `json:"schema_ref"`
+	Payload        json.RawMessage  `json:"payload"`
+	CreatedBy      string           `json:"created_by"`
+	CreatedAt      string           `json:"created_at"`
+	// Current marks the object's newest version (the log's head).
+	Current bool `json:"current"`
+}
+
+// objectRelationPayload is one relation incident to the object, with the
+// other endpoint's identity resolved (its drill-down coordinate, unlike
+// the write payload's raw version ids).
+type objectRelationPayload struct {
+	RelationType string `json:"relation_type"`
+	// Direction is "outgoing" when the selected object is the relation's
+	// source and "incoming" when it is the target.
+	Direction       string `json:"direction"`
+	OtherObjectID   string `json:"other_object_id"`
+	OtherObjectType string `json:"other_object_type"`
+	OtherTitle      string `json:"other_title"`
+	VersionNo       int    `json:"version_no"`
+	CreatedBy       string `json:"created_by"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// objectDetailPayload is the browse surface's read: the object payload for
+// the SELECTED version, the whole version log, and the relations.
+type objectDetailPayload struct {
+	objectPayload
+	ProjectSlug       string                  `json:"project_slug"`
+	ProjectName       string                  `json:"project_name"`
+	BranchID          string                  `json:"branch_id"`
+	BranchName        string                  `json:"branch_name"`
+	SelectedVersionNo int                     `json:"selected_version_no"`
+	Versions          []objectVersionPayload  `json:"versions"`
+	Relations         []objectRelationPayload `json:"relations"`
+}
+
+// objectDetailPayloadFrom renders the service read as the wire contract.
+// Relations are classified by which endpoint's version belongs to THIS
+// object; the other endpoint's coordinate is its container object id (the
+// browse surface resolves its branch from the outline, exactly as the
+// server-rendered page does — no coordinate is fabricated here).
+func objectDetailPayloadFrom(d rsg.ObjectDetail) objectDetailPayload {
+	p := objectDetailPayload{
+		objectPayload: objectPayload{
+			ID:             d.Object.ID,
+			ProjectID:      d.Object.ProjectID,
+			ObjectType:     d.Object.ObjectType,
+			CurrentVersion: d.Object.CurrentVersionNo,
+			VersionID:      d.Selected.ID,
+			VersionNo:      d.Selected.VersionNo,
+			StateID:        d.Selected.StateID,
+			Title:          d.Selected.Title,
+			LifecycleState: string(d.Selected.LifecycleState),
+			SchemaRef:      schemaRefPayload{ID: d.Selected.SchemaID, Version: d.Selected.SchemaVersion},
+			Payload:        d.Selected.Payload,
+		},
+		ProjectSlug:       d.Project.Slug,
+		ProjectName:       d.Project.Name,
+		BranchID:          d.Branch.ID,
+		BranchName:        d.Branch.Name,
+		SelectedVersionNo: d.Selected.VersionNo,
+		Versions:          make([]objectVersionPayload, 0, len(d.Versions)),
+		Relations:         make([]objectRelationPayload, 0, len(d.Relations)),
+	}
+	for _, v := range d.Versions {
+		p.Versions = append(p.Versions, objectVersionPayload{
+			VersionID:      v.ID,
+			VersionNo:      v.VersionNo,
+			StateID:        v.StateID,
+			Title:          v.Title,
+			LifecycleState: string(v.LifecycleState),
+			SchemaRef:      schemaRefPayload{ID: v.SchemaID, Version: v.SchemaVersion},
+			Payload:        v.Payload,
+			CreatedBy:      v.CreatedBy,
+			CreatedAt:      v.CreatedAt.UTC().Format(time.RFC3339),
+			Current:        v.VersionNo == d.Object.CurrentVersionNo,
+		})
+	}
+	versionIDs := make(map[string]struct{}, len(d.Versions))
+	for _, v := range d.Versions {
+		versionIDs[v.ID] = struct{}{}
+	}
+	for _, rv := range d.Relations {
+		_, isSource := versionIDs[rv.Relation.SourceObjectVersionID]
+		other := rv.Target
+		direction := "outgoing"
+		if !isSource {
+			other = rv.Source
+			direction = "incoming"
+		}
+		p.Relations = append(p.Relations, objectRelationPayload{
+			RelationType:    rv.Relation.RelationType,
+			Direction:       direction,
+			OtherObjectID:   other.ObjectID,
+			OtherObjectType: other.ObjectType,
+			OtherTitle:      other.Title,
+			VersionNo:       rv.Relation.VersionNo,
+			CreatedBy:       rv.Relation.CreatedBy,
+			CreatedAt:       rv.Relation.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return p
 }
 
 // queryPayload is the client-visible RSG graph slice (T0209): the resolved

@@ -30,6 +30,15 @@
 #      context can see neither the private project nor its existence.
 #      NOTE the order: this journey CREATES projects, so it runs after the
 #      ones whose assertions are about a new account's empty directory.
+#   6. the WEB-05 journey (T1306): the Research tab of a seeded PRIVATE
+#      project — the map and the list agree about the object set in both
+#      views, a question, an experiment and a finding each reach their old
+#      version by clicking, and the return path keeps the object and its
+#      version. Its research state is seeded (harness/fixture.go) because no
+#      web surface can author one yet; the journey only reads it and claims
+#      no creation step (docs/70 §6.3). The fixture owner signs in through
+#      the product's /login form with credentials both sides derive from
+#      WEB_V2_RUN_ID — never a constant, never recorded.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.
@@ -256,14 +265,25 @@ if ! WEB_V2_EVIDENCE_DIR="$U02_EVIDENCE_DIR" node "$V2_DIR/journey-u02.mjs" "$BA
 fi
 
 # ---- 12. WEB-04 browser journey (create a project, and who may see it) ------
-# Runs last on purpose: it creates projects, and the journeys above assert a
-# new account's EMPTY directory. The journey writes its own evidence under
+# Runs after the journeys that assert a new account's EMPTY directory, on
+# purpose: it creates projects. The journey writes its own evidence under
 # $EVIDENCE_DIR/web04 (it appends "web04"), so it cannot overwrite another
 # journey's metadata/steps/trace.
 echo "== web-v2: browser journey (WEB-04 create: Public default, Private choice, duplicate address, anonymous hiding) =="
 if ! node "$V2_DIR/journey-web04.mjs" "$BASE"; then
   cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
   fail "the WEB-04 browser journey failed (evidence: $EVIDENCE_DIR/web04)"
+fi
+
+# ---- 13. WEB-05 browser journey (research objects, versions, return path) ---
+# Reads the PRIVATE browse fixture the harness seeded (harness/fixture.go) as
+# its owner, signed in through /login. It creates no state, so its position
+# relative to the journeys above is free; it is last because it is the newest
+# slice. Its own evidence goes under $EVIDENCE_DIR/web05.
+echo "== web-v2: browser journey (WEB-05 browse: map/list agreement, old versions, return path) =="
+if ! node "$V2_DIR/journey-web05.mjs" "$BASE"; then
+  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+  fail "the WEB-05 browser journey failed (evidence: $EVIDENCE_DIR/web05)"
 fi
 
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
@@ -276,7 +296,8 @@ cat > "$EVIDENCE_DIR/runner.json" <<EOF
   "api_origin": "$API_URL",
   "result": "passed",
   "evidence_dir": "$EVIDENCE_DIR",
-  "u02_evidence_dir": "$U02_EVIDENCE_DIR"
+  "u02_evidence_dir": "$U02_EVIDENCE_DIR",
+  "web05_evidence_dir": "$EVIDENCE_DIR/web05"
 }
 EOF
 echo "web-v2: PASSED — evidence in $EVIDENCE_DIR"
