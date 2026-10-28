@@ -17,11 +17,21 @@
 #   1. the static anti-bypass scan over every journey/helper module;
 #   2. the entry-point pre-flight (sign-in form + account-establishment
 #      entry) — missing entry fails, it never skips;
-#   3. the browser journey: sign up through the DOM, the signed-in home's
-#      project entry works, the session survives a reload and a second page,
-#      sign out, a wrong password is reported recoverably, signing in from
-#      another page returns to it, the session survives another reload, and
-#      a session ended elsewhere offers a recoverable sign-in prompt.
+#   3. the U01/U02 browser journey: sign up through the DOM, the signed-in
+#      home's project entry works, the session survives a reload and a second
+#      page, sign out, a wrong password is reported recoverably, signing in
+#      from another page returns to it, the session survives another reload,
+#      and a session ended elsewhere offers a recoverable sign-in prompt;
+#   4. the T1304 (WEB-03) browser journey over THREE real accounts and three
+#      isolated browser contexts: A creates an organization through the web
+#      form and owns it, B and V create their own accounts, A invites them by
+#      handle as Contributor and Viewer, V's attempt to promote itself is
+#      refused by the API and shown on the page, A's role change for B
+#      survives both readers' reloads without rewriting the affiliation
+#      start, and V leaves with its membership row kept.
+#
+# Every journey writes its own evidence directory under the run's evidence
+# (the U02 slice under <run>/u02), and a failing journey fails the run.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.
@@ -235,6 +245,18 @@ if ! node "$V2_DIR/journey.mjs" "$BASE"; then
   fail "the browser journey failed (evidence: $EVIDENCE_DIR)"
 fi
 
+# ---- 11. WEB-03 browser journey (organizations, members, roles) ------------
+# Its own evidence subdirectory: two journeys write two step records, two
+# traces and two screenshot series, and merging them into one run-id would
+# make neither reviewable.
+echo "== web-v2: browser journey U02 (organizations/members/roles) =="
+U02_EVIDENCE_DIR="$EVIDENCE_DIR/u02"
+mkdir -p "$U02_EVIDENCE_DIR"
+if ! WEB_V2_EVIDENCE_DIR="$U02_EVIDENCE_DIR" node "$V2_DIR/journey-u02.mjs" "$BASE"; then
+  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+  fail "the WEB-03 (U02) browser journey failed (evidence: $U02_EVIDENCE_DIR)"
+fi
+
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
 cat > "$EVIDENCE_DIR/runner.json" <<EOF
 {
@@ -244,7 +266,8 @@ cat > "$EVIDENCE_DIR/runner.json" <<EOF
   "web_origin": "$BASE",
   "api_origin": "$API_URL",
   "result": "passed",
-  "evidence_dir": "$EVIDENCE_DIR"
+  "evidence_dir": "$EVIDENCE_DIR",
+  "u02_evidence_dir": "$U02_EVIDENCE_DIR"
 }
 EOF
 echo "web-v2: PASSED — evidence in $EVIDENCE_DIR"

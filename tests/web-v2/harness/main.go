@@ -55,6 +55,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/lichman0405/post/cmd/api/authhttp"
+	"github.com/lichman0405/post/cmd/api/orgshttp"
+	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/authz"
@@ -286,6 +288,22 @@ func run(ctx context.Context, cfg config) error {
 	})
 	mux.Handle("/api/v1/projects", projectAPI.Routes())
 	mux.Handle("/api/v1/projects/", projectAPI.Routes())
+
+	// The organization surface (T1304 / WEB-03, G03): creation, the member
+	// list, invites, role changes and end-of-affiliation, composed exactly as
+	// cmd/api composes them (pgx OrgStore, production handlers and guard).
+	// The journey drives all of it through the web UI; no step calls it.
+	orgAPI := orgshttp.New(orgshttp.Deps{Store: orgStore})
+	mux.Handle("/api/v1/organizations", orgAPI.Routes())
+	mux.Handle("/api/v1/organizations/", orgAPI.Routes())
+
+	// The public profile read (T0102): the member page resolves a membership
+	// row's user id to the handle the reader recognises. The API's payload is
+	// the public one; the journey never reads it directly.
+	profileAPI := profilehttp.New(profilehttp.Deps{
+		Profiles: persistence.NewProfileStore(pool),
+	})
+	profileAPI.Register(mux)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
