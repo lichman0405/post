@@ -3050,6 +3050,36 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1336-TEST-01",
+      "task_id": "T1336",
+      "name": "Dataset, Protocol, Material and Sample each have a working form and version history",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1337-TEST-01",
+      "task_id": "T1337",
+      "name": "each of the 12 V1 object types has its own working form acceptance",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1337-TEST-02",
+      "task_id": "T1337",
+      "name": "Claim, Finding and ExternalReference keep versions and relations after reload",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 207,
+  "task_count": 209,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -10456,7 +10456,7 @@
       "id": "T1307",
       "phase": "P14",
       "phase_name": "V2 可部署团队试用版",
-      "title": "WEB-06 分支与结构化研究编辑",
+      "title": "WEB-06a 分支与结构化研究编辑：草稿 + Question/Hypothesis/Experiment/Calculation",
       "v1_required": false,
       "v2_required": true,
       "web_package": "WEB-06",
@@ -10464,21 +10464,23 @@
         "T1306"
       ],
       "requirements": [
-        "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查",
-        "只在 WEB-06 定义的范围内交付；不得顺带实现其他 WEB 工作包。",
-        "所有业务步骤由网页正常入口完成；不得用 API、SQL、CLI 或 seed 代做验收步骤。"
+        "建立/切换研究 branch；用最少信息保存草稿，离页/重登入后可继续。",
+        "为 Question、Hypothesis、Experiment、Calculation 四类对象提供 Web 表单、版本与关联编辑；失败结果可记录。",
+        "送审前检查必要字段；草稿可逐步补全，但不得虚报送审成功。",
+        "只在四类对象与共享表单基础设施内交付；Dataset/Protocol/Material/Sample 与 Claim/Finding/ExternalReference 分别由 T1336/T1337 承接。"
       ],
       "deliverables": [
         "G05/G06：建立／切换 branch，分批覆盖全部 12 类 V1 科研对象、版本、关联、提交说明；D15 草稿逐步完善与阶段性完整性检查",
         "WEB-06 的网页入口、权限负向与失败恢复证据（未执行时记 not_run）。"
       ],
       "acceptance_criteria": [
-        "U03：少量信息可保存／重开草稿，逐步补全；至少主故事完整编辑 Question→Experiment/Calculation→Dataset→Claim/Finding；每类对象有独立表单验收；刷新／切 branch 后资料与版本正确"
+        "U03（切片 a）：保存最小草稿、刷新/切 branch 后继续；Question→Hypothesis→Experiment/Calculation 的编辑与版本正确。",
+        "四类对象各有独立表单验收；失败结果不被改写成成功。"
       ],
       "tests": [
         "U03 saves a minimal draft, leaves, reloads and continues it",
-        "the main story edits Question->Experiment/Calculation->Dataset->Claim/Finding",
-        "each of the 12 V1 object types has its own form acceptance"
+        "the branch can be created/switched and the four slice-a object types have working forms",
+        "versions and relations for the four types survive a reload and a branch switch"
       ],
       "allowed_scope": [
         "apps/web/app/(main)/projects/[id]/research/**",
@@ -10509,7 +10511,7 @@
         "docs/09_VERSION_CONTROL.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "D15：先存草稿、逐步补全；送审/发布前检查完整性。12 类对象逐一验收，不允许单一 happy path 宣称全类型完成。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：本 web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。"
+      "supervisor_scope_narrowing": "D15：先存草稿、逐步补全；送审/发布前检查完整性。12 类对象逐一验收，不允许单一 happy path 宣称全类型完成。 本任务按工作包注册；派工前 Supervisor 可再拆成无冲突切片，但每个切片仍受本 allowed_scope 约束，且不得把未实现的功能写成 passed。 Supervisor L1：本 web 工作包允许为新增文案添加 apps/web/lib/i18n.ts 的键与 parity 测试；不得改既有 key 语义、translate()/CATALOG 或放宽扫描器。 本片只做分支/草稿与 Question/Hypothesis/Experiment/Calculation；其余对象族在 T1336/T1337，不得顺手实现。i18n 只加本片文案键。"
     },
     {
       "id": "T1308",
@@ -12184,6 +12186,117 @@
         "docs/42_PAGE_SPECS.md"
       ],
       "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。"
+    },
+    {
+      "id": "T1336",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-06b 结构化研究编辑：Dataset/Protocol/Material/Sample",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-06",
+      "dependencies": [
+        "T1307"
+      ],
+      "requirements": [
+        "为 Dataset、Protocol、Material、Sample 提供 Web 表单、版本与关联编辑。",
+        "Dataset 可关联已有输出/附件（上传本身属 WEB-09）；不得伪造数据。",
+        "四类对象各有独立表单验收；版本/关联刷新后正确。"
+      ],
+      "deliverables": [
+        "对应对象族的 Web 表单、版本/关联与浏览器证据"
+      ],
+      "acceptance_criteria": [
+        "U03（切片 b）：四类对象各建立一次、改一版并刷新；关联与版本正确。"
+      ],
+      "tests": [
+        "Dataset, Protocol, Material and Sample each have a working form and version history"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/research-profile.ts",
+        "apps/web/lib/research-profile.test.mjs",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs",
+        "cmd/api/rsghttp/**",
+        "internal/application/rsg/**",
+        "internal/rsg/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "infra/migrations/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/07_RSG_SPEC.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "只交付本片对象族；共享 research 页/表单基础设施沿用 T1307，不重写。i18n 只加本片键；不得实现其他对象族。"
+    },
+    {
+      "id": "T1337",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-06c 结构化研究编辑：Claim/Finding/ExternalReference 与全类型矩阵",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-06",
+      "dependencies": [
+        "T1307"
+      ],
+      "requirements": [
+        "为 Claim、Finding、ExternalReference 及剩余 V1 类型提供表单、版本与关联。",
+        "建立全部 12 类 V1 对象的表单矩阵；每类都有独立验收，不以单一 happy path 宣称完成。",
+        "Claim/Finding 的 statement/scope 与证据关联可保存，不生成 Truth Score。"
+      ],
+      "deliverables": [
+        "对应对象族的 Web 表单、版本/关联与浏览器证据"
+      ],
+      "acceptance_criteria": [
+        "U03（切片 c）：12 类对象表单矩阵全通过；Claim/Finding/ExternalReference 建立、改版、刷新正确。"
+      ],
+      "tests": [
+        "each of the 12 V1 object types has its own working form acceptance",
+        "Claim, Finding and ExternalReference keep versions and relations after reload"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/research/**",
+        "apps/web/lib/research-profile.ts",
+        "apps/web/lib/research-profile.test.mjs",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs",
+        "cmd/api/rsghttp/**",
+        "internal/application/rsg/**",
+        "internal/rsg/**",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "infra/migrations/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/07_RSG_SPEC.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/09_VERSION_CONTROL.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "只交付本片对象族；共享 research 页/表单基础设施沿用 T1307，不重写。i18n 只加本片键；不得实现其他对象族。"
     }
   ]
 }

@@ -13272,31 +13272,7 @@
       ]
     },
     "T1307": {
-      "status": "worker_failed",
-      "started_at": "2026-10-28T07:46:31Z",
-      "worker_run_id": "run-7774514179605a38",
-      "history": [
-        {
-          "from": "todo",
-          "to": "ready",
-          "at": "2026-10-28T07:46:27Z",
-          "run_id": "run-8641bece6cea1f19"
-        },
-        {
-          "from": "ready",
-          "to": "running",
-          "at": "2026-10-28T07:46:31Z",
-          "run_id": "run-7774514179605a38",
-          "reason": "worker spawn"
-        },
-        {
-          "from": "running",
-          "to": "worker_failed",
-          "at": "2026-10-28T08:08:29Z",
-          "run_id": "run-98f230e924c3dafa",
-          "reason": "worker exited 1"
-        }
-      ]
+      "status": "todo"
     },
     "T1308": {
       "status": "todo"
@@ -13570,6 +13546,29 @@
       "notes": "Issue #387; PR #388. stop (exit 143) -> reject -> respawn -> collect -> three reviews (two request_changes, one approve) -> G1-G4."
     },
     "T1335": {
+      "status": "running",
+      "started_at": "2026-10-28T08:09:14Z",
+      "worker_run_id": "run-1c763f6f3401d564",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T08:09:09Z",
+          "run_id": "run-de762dee4389d754"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T08:09:14Z",
+          "run_id": "run-1c763f6f3401d564",
+          "reason": "worker spawn"
+        }
+      ]
+    },
+    "T1336": {
+      "status": "todo"
+    },
+    "T1337": {
       "status": "todo"
     }
   },

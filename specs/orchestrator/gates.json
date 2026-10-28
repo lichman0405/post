@@ -1483,6 +1483,16 @@
       "g3_jobs": [
         "acceptance"
       ]
+    },
+    "T1336": {
+      "g3_jobs": [
+        "acceptance"
+      ]
+    },
+    "T1337": {
+      "g3_jobs": [
+        "acceptance"
+      ]
     }
   }
 }

@@ -125,7 +125,9 @@
     {
       "web": "WEB-06",
       "tasks": [
-        "T1307"
+        "T1307",
+        "T1336",
+        "T1337"
       ],
       "milestone": "M1",
       "journeys": [
