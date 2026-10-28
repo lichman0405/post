@@ -10424,15 +10424,14 @@
       ],
       "allowed_scope": [
         "apps/web/app/(main)/projects/[id]/research/**",
-        "apps/web/app/(main)/projects/[[]id]/page.tsx",
-        "apps/web/app/(main)/projects/[[]id]/tab-placeholder.tsx",
         "apps/web/lib/entity-meta.ts",
         "apps/web/lib/entity-meta.test.mjs",
         "cmd/api/rsghttp/**",
         "internal/application/sciobjects/**",
         "tests/web-v2/**",
         "apps/web/lib/i18n.ts",
-        "apps/web/lib/i18n.test.mjs"
+        "apps/web/lib/i18n.test.mjs",
+        "apps/web/app/(main)/projects/[id]/**"
       ],
       "forbidden_scope": [
         ".git/**",
