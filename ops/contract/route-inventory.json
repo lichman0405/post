@@ -2,18 +2,18 @@
   "version": 1,
   "task": "T1205",
   "generated_by": "go run ./tests/cmd/contractgate -write-inventory ops/contract/route-inventory.json",
-  "source": "T1205 worktree run against . at b94c4777772c5084bfef8960ca887fb90f95970b (uncommitted T1205 diff)",
+  "source": "T1335 worktree run against . at ad3e34ae30c7d4b29d20bc1974958d0313970f4e (uncommitted T1335 diff)",
   "summary": {
-    "scanned_files": 728,
-    "mounted_routes_in_gate_scope": 134,
+    "scanned_files": 738,
+    "mounted_routes_in_gate_scope": 135,
     "mounted_and_in_contract": 30,
     "mounted_and_exempted": 0,
-    "mounted_and_undocumented": 98,
+    "mounted_and_undocumented": 99,
     "mounted_catchall_resolved_to_contract": 6,
-    "registrations_outside_gate_scope": 6,
-    "contract_operations": 40,
-    "contract_path_entries": 37,
-    "contract_operations_not_mounted": 3,
+    "registrations_outside_gate_scope": 9,
+    "contract_operations": 38,
+    "contract_path_entries": 35,
+    "contract_operations_not_mounted": 1,
     "exemption_entries": 0,
     "exemption_entries_with_resolvable_citation": 0
   },
@@ -994,6 +994,19 @@
       "uncertain": false
     },
     {
+      "method": "POST",
+      "path": "/api/v1/projects/{projectId}/members",
+      "file": "cmd/api/projectshttp/projects_wiring.go",
+      "line": 76,
+      "registration": "cmd/api/projectshttp/projects_wiring.go:76",
+      "registered_in": "(*API).Routes",
+      "handler": "h.handleAddMember",
+      "status": "undocumented",
+      "suggest": "contract",
+      "reason": "projectshttp surface (handler h.handleAddMember): mounted under /api/v1 and absent from specs/api/openapi.yaml — the project member invite is a product endpoint the contract should declare (openapi-first, CLAUDE.md §7).",
+      "uncertain": false
+    },
+    {
       "method": "PUT",
       "path": "/api/v1/projects/{projectId}/members/{userId}",
       "file": "cmd/api/projectshttp/projects_wiring.go",
@@ -1736,6 +1749,14 @@
   "out_of_scope": [
     {
       "method": "ANY",
+      "path": "/",
+      "file": "cmd/api/main.go",
+      "line": 1424,
+      "in": "run",
+      "note": "outside the contract's server prefix (/api/v1): probed by the same scan, gated by nothing — it is not part of the API contract's surface"
+    },
+    {
+      "method": "ANY",
       "path": "/healthz",
       "file": "cmd/api/main.go",
       "line": 206,
@@ -1767,6 +1788,22 @@
       "note": "outside the contract's server prefix (/api/v1): probed by the same scan, gated by nothing — it is not part of the API contract's surface"
     },
     {
+      "method": "GET",
+      "path": "/metrics",
+      "file": "cmd/api/main.go",
+      "line": 1423,
+      "in": "run",
+      "note": "outside the contract's server prefix (/api/v1): probed by the same scan, gated by nothing — it is not part of the API contract's surface"
+    },
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "file": "internal/observability/serve.go",
+      "line": 37,
+      "in": "ServeMetrics",
+      "note": "outside the contract's server prefix (/api/v1): probed by the same scan, gated by nothing — it is not part of the API contract's surface"
+    },
+    {
       "method": "ANY",
       "path": "/readyz",
       "file": "cmd/api/main.go",
@@ -1787,9 +1824,9 @@
   "mounts": [
     {
       "path": "/api/v1/",
-      "handler": "authAPI.Guard(v1)",
+      "handler": "authAPI.Guard(observability.RecordRoute(v1))",
       "file": "cmd/api/main.go",
-      "line": 1382,
+      "line": 1386,
       "in": "run"
     },
     {
@@ -2246,8 +2283,8 @@
     }
   ],
   "finding_counts": {
-    "undocumented": 98,
-    "unmounted": 3
+    "undocumented": 99,
+    "unmounted": 1
   },
   "notes": [
     "status is the comparator's verdict, not a judgement: in_contract | catchall | exempted | undocumented.",

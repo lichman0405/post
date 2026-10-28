@@ -284,6 +284,12 @@ func (h *handlers) projectError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, projects.ErrOwnerRoleChange):
 		authhttp.WriteError(w, r, http.StatusForbidden, projects.CodeOwnerRoleChangeForbidden,
 			"only owners may grant or revoke the owner role")
+	case errors.Is(err, projects.ErrUserNotFound):
+		authhttp.WriteError(w, r, http.StatusNotFound, projects.CodeUserNotFound,
+			"no user with this handle")
+	case errors.Is(err, projects.ErrAlreadyMember):
+		authhttp.WriteError(w, r, http.StatusConflict, projects.CodeMemberAlreadyExists,
+			"the user is already a member of this project")
 	case errors.Is(err, projects.ErrVisibilityChangeNotSupported):
 		authhttp.WriteError(w, r, http.StatusBadRequest, projects.CodeVisibilityChangeNotSupported,
 			"visibility is preview-only; changes land with the publishing guard")

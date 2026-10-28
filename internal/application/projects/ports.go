@@ -72,6 +72,19 @@ type ProjectStore interface {
 	// transaction under the project-row lock, so concurrent demotions
 	// cannot orphan the project).
 	UpdateMembershipRole(ctx context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error)
+	// AddProjectMembership adds one membership — an existing account
+	// resolved by the service from its handle — at the given role and
+	// records the audit entry in the same transaction (T1335: the invite
+	// path; the row is created under the project-row lock, so the audit
+	// and the membership are one unit). It fails with ErrProjectNotFound
+	// for an unknown project and ErrAlreadyMember when the account
+	// already holds a membership in the project (the primary-key conflict
+	// decides the concurrent case, so two racing invites add one row).
+	AddProjectMembership(ctx context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error)
+	// GetUserByHandle resolves an account by its handle (members are added
+	// by handle — the person, not an id the client had to know first) or
+	// ErrUserNotFound.
+	GetUserByHandle(ctx context.Context, handle string) (domain.User, error)
 	// UpdateProjectSettings applies the settings edit (purpose and/or
 	// activity status) and records the audit entry in the same
 	// transaction. It fails with ErrProjectNotFound for an unknown

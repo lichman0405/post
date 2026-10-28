@@ -347,6 +347,8 @@ func wrapStoreError(err error) error {
 		errors.Is(err, ErrMemberNotFound),
 		errors.Is(err, ErrTargetMemberNotFound),
 		errors.Is(err, ErrLastOwner),
+		errors.Is(err, ErrUserNotFound),
+		errors.Is(err, ErrAlreadyMember),
 		errors.Is(err, ErrSettingsForbidden):
 		return err
 	default:

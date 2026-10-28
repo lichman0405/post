@@ -33,6 +33,11 @@ type Projects struct {
 	programs map[string]domain.Program
 	projects map[string]domain.Project
 	members  map[[2]string]domain.ProjectMembership
+	// users is the account directory the invite path resolves handles
+	// against (the production adapter reads the users table), keyed by
+	// user id; handles indexes the same records by normalized handle.
+	users   map[string]domain.User
+	handles map[string]string
 	// audits records the AuditEntry each settings write produced (the
 	// production adapter writes the audit_log row in the same transaction
 	// as the state change; the in-memory space has no table, so the
@@ -49,7 +54,39 @@ func NewProjects() *Projects {
 		programs: map[string]domain.Program{},
 		projects: map[string]domain.Project{},
 		members:  map[[2]string]domain.ProjectMembership{},
+		users:    map[string]domain.User{},
+		handles:  map[string]string{},
 	}
+}
+
+// SeedUser registers an account in the in-memory directory, the way a
+// signup would have landed in the production users table (test/dev
+// bootstrap). An empty handle gets the derived shape the member list used
+// before a directory existed, so older fixtures keep working.
+func (s *Projects) SeedUser(u domain.User) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if u.ID == "" {
+		u.ID = s.freshID()
+	}
+	if u.Handle == "" {
+		u.Handle = "u-" + u.ID
+	}
+	if u.DisplayName == "" {
+		u.DisplayName = "User " + u.ID
+	}
+	s.users[u.ID] = u
+	s.handles[domain.NormalizeHandle(u.Handle)] = u.ID
+}
+
+// userIdentity returns the handle and display name the member list shows
+// for a user: the seeded account when the directory knows it, otherwise
+// the derived shape the other in-memory doubles use (no user table).
+func (s *Projects) userIdentity(userID string) (handle, displayName string) {
+	if u, ok := s.users[userID]; ok {
+		return u.Handle, u.DisplayName
+	}
+	return "u-" + userID, "User " + userID
 }
 
 // Gate returns the organization-gate half of this space (projects.OrgGate)
@@ -150,9 +187,9 @@ func (s *Projects) GetMembership(_ context.Context, projectID, userID string) (d
 
 // ListProjectMembers implements projects.ProjectStore: every membership of
 // the project joined with the member's identity, oldest membership first
-// (CreatedAt, user id as the deterministic tie-breaker). The in-memory
-// space has no user table; the identity is derived the way the other
-// in-memory doubles derive it.
+// (CreatedAt, user id as the deterministic tie-breaker). Identity comes
+// from the seeded account directory when it knows the user; otherwise it
+// is derived the way the other in-memory doubles derive it.
 func (s *Projects) ListProjectMembers(_ context.Context, projectID string) ([]domain.ProjectMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,10 +198,11 @@ func (s *Projects) ListProjectMembers(_ context.Context, projectID string) ([]do
 		if m.ProjectID != projectID {
 			continue
 		}
+		handle, displayName := s.userIdentity(m.UserID)
 		out = append(out, domain.ProjectMember{
 			UserID:      m.UserID,
-			Handle:      "u-" + m.UserID,
-			DisplayName: "User " + m.UserID,
+			Handle:      handle,
+			DisplayName: displayName,
 			Role:        m.Role,
 			JoinedAt:    m.CreatedAt,
 		})
@@ -208,6 +246,42 @@ func (s *Projects) UpdateMembershipRole(_ context.Context, projectID, userID str
 	s.members[key] = current
 	s.audits = append(s.audits, audit)
 	return current, nil
+}
+
+// AddProjectMembership implements projects.ProjectStore (T1335): adds one
+// membership for a resolved account and records the audit entry. The
+// store mutex is the single-writer stand-in for the production
+// transaction's project-row lock; a duplicate membership answers
+// ErrAlreadyMember exactly like the adapter's primary-key conflict does.
+func (s *Projects) AddProjectMembership(_ context.Context, projectID, userID string, role domain.ProjectRole, audit domain.AuditEntry) (domain.ProjectMembership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.projects[projectID]; !ok {
+		return domain.ProjectMembership{}, projects.ErrProjectNotFound
+	}
+	key := [2]string{projectID, userID}
+	if _, exists := s.members[key]; exists {
+		return domain.ProjectMembership{}, projects.ErrAlreadyMember
+	}
+	m := domain.ProjectMembership{
+		ProjectID: projectID, UserID: userID, Role: role,
+		CreatedAt: time.Now().UTC(),
+	}
+	s.members[key] = m
+	s.audits = append(s.audits, audit)
+	return m, nil
+}
+
+// GetUserByHandle implements projects.ProjectStore (T1335): resolves a
+// seeded account by normalized handle, or ErrUserNotFound.
+func (s *Projects) GetUserByHandle(_ context.Context, handle string) (domain.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.handles[domain.NormalizeHandle(handle)]
+	if !ok {
+		return domain.User{}, projects.ErrUserNotFound
+	}
+	return s.users[id], nil
 }
 
 // UpdateProjectSettings implements projects.ProjectStore: applies the

@@ -82,6 +82,37 @@ func (h *handlers) handleSetMemberRole(w http.ResponseWriter, r *http.Request) {
 	authhttp.WriteJSON(w, http.StatusOK, membershipPayloadFromDomain(membership))
 }
 
+type addMemberRequest struct {
+	Handle string `json:"handle"`
+	Role   string `json:"role"`
+}
+
+// handleAddMember: POST /api/v1/projects/{projectId}/members — add an
+// existing account, named by handle, at the chosen role (T1335: the
+// Settings member flow; WEB-03's UI arrives in T1338). Owner/maintainer
+// only; the service resolves the handle, refuses an unknown account, an
+// existing member, a bad role and (for maintainers) the owner role, and
+// records the project.member_role_changed audit entry with the membership
+// row. The write rides the guard's session + CSRF checks like every state
+// change.
+func (h *handlers) handleAddMember(w http.ResponseWriter, r *http.Request) {
+	actor, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	var req addMemberRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	membership, err := h.svc.AddMember(r.Context(), actor,
+		r.PathValue("projectId"), req.Handle, domain.ProjectRole(req.Role))
+	if err != nil {
+		h.projectError(w, r, err)
+		return
+	}
+	authhttp.WriteJSON(w, http.StatusCreated, membershipPayloadFromDomain(membership))
+}
+
 type updateSettingsRequest struct {
 	Purpose        *string `json:"purpose"`
 	ActivityStatus *string `json:"activity_status"`

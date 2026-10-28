@@ -256,7 +256,9 @@ func mapProjectWriteError(err error) error {
 		errors.Is(err, projects.ErrProgramOrgMismatch),
 		errors.Is(err, projects.ErrProjectNotFound),
 		errors.Is(err, projects.ErrTargetMemberNotFound),
-		errors.Is(err, projects.ErrLastOwner):
+		errors.Is(err, projects.ErrLastOwner),
+		errors.Is(err, projects.ErrUserNotFound),
+		errors.Is(err, projects.ErrAlreadyMember):
 		return err
 	}
 	var pgErr *pgconn.PgError
@@ -264,6 +266,12 @@ func mapProjectWriteError(err error) error {
 		switch {
 		case pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "slug"):
 			return projects.ErrSlugTaken
+		// The project_memberships primary key (project_id, user_id) is
+		// what a second add of the same account collides on: the invite
+		// path answers "already a member", and two racing invites leave
+		// exactly one row (T1335).
+		case pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "project_memberships"):
+			return projects.ErrAlreadyMember
 		case pgErr.Code == "23503" && strings.Contains(pgErr.ConstraintName, "program"):
 			return projects.ErrProgramNotFound
 		case pgErr.Code == "23503" && strings.Contains(pgErr.ConstraintName, "organization"):
