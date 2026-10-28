@@ -3024,7 +3024,7 @@
     {
       "id": "T1335-TEST-01",
       "task_id": "T1335",
-      "name": "the owner adds an existing account by handle and the invitee sees the project after login",
+      "name": "the owner can add an existing account by handle and role through the project members API",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",
@@ -3034,7 +3034,7 @@
     {
       "id": "T1335-TEST-02",
       "task_id": "T1335",
-      "name": "a non-owner cannot add or promote a member",
+      "name": "a non-owner cannot add or promote a member through the API",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",
@@ -3044,7 +3044,7 @@
     {
       "id": "T1335-TEST-03",
       "task_id": "T1335",
-      "name": "unknown handle, duplicate member and invalid role are explicit field errors",
+      "name": "unknown handle, duplicate member and invalid role are explicit API errors",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",
@@ -3075,6 +3075,36 @@
       "id": "T1337-TEST-02",
       "task_id": "T1337",
       "name": "Claim, Finding and ExternalReference keep versions and relations after reload",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1338-TEST-01",
+      "task_id": "T1338",
+      "name": "the owner invites an existing account by handle through project Settings and the invitee sees the project",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1338-TEST-02",
+      "task_id": "T1338",
+      "name": "a non-owner cannot invite or promote a member through the UI",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1338-TEST-03",
+      "task_id": "T1338",
+      "name": "unknown handle, duplicate member and invalid role show field errors",
       "gate": "task-defined",
       "blocking": true,
       "status": "not_run",

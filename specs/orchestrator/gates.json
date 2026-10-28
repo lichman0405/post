@@ -1493,6 +1493,11 @@
       "g3_jobs": [
         "acceptance"
       ]
+    },
+    "T1338": {
+      "g3_jobs": [
+        "acceptance"
+      ]
     }
   }
 }

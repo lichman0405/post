@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 209,
+  "task_count": 210,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -12130,7 +12130,7 @@
       "id": "T1335",
       "phase": "P14",
       "phase_name": "V2 可部署团队试用版",
-      "title": "WEB-03 补口：项目成员邀请（owner/maintainer 按 handle 添加现有账号并选角色）",
+      "title": "WEB-03 补口后端：项目成员邀请 API/Store（按 handle 添加现有账号）",
       "v1_required": false,
       "v2_required": true,
       "web_package": "WEB-03",
@@ -12139,34 +12139,28 @@
         "T1305"
       ],
       "requirements": [
-        "owner/maintainer 在项目 Settings 按 handle 把已有账号加入项目并选择角色；非授权角色被拒。",
-        "后端新增 project membership 创建路径（复用现有角色表与权限矩阵），不新增权限动作或扩大可见性。",
-        "未知 handle、重复成员、非法角色、非成员越权都有明确错误；角色修改沿用现有校验。",
-        "浏览器旅程：A 在 Settings 添加 B；B 登录后在 Home 看到该项目并能打开项目页；B 不能提升自己。"
+        "在 cmd/api/projectshttp 增加 owner/maintainer 可调用的 POST 项目成员路由；复用 requireManager 与 ValidProjectRole，不新增权限动作、不扩大可见性。",
+        "在 internal/persistence 的 ProjectStore/memstore 实现 GetUserByHandle 与 AddProjectMembership（WithTx、项目行锁、23505→重复成员、审计复用 project.member_role_changed）。",
+        "未知 handle、重复成员、非法角色、非成员越权都有明确错误；补 Go handler/persistence 测试。",
+        "登记 ops/contract/route-inventory.json；不做迁移、不 seed 成员、不改前端。"
       ],
       "deliverables": [
         "项目 Settings 成员邀请 UI/API/测试",
         "tests/web-v2 的成员邀请旅程与证据"
       ],
       "acceptance_criteria": [
-        "A 通过网页把 B 加为 Contributor；B 重新登录可见项目；V/非成员不能邀请或提权；历史成员关系不被改写。"
+        "API 测试：owner 按 handle 添加现有账号为 Contributor；非 owner 被拒；未知/重复/非法角色错误明确；持久化行为正确。"
       ],
       "tests": [
-        "the owner adds an existing account by handle and the invitee sees the project after login",
-        "a non-owner cannot add or promote a member",
-        "unknown handle, duplicate member and invalid role are explicit field errors"
+        "the owner can add an existing account by handle and role through the project members API",
+        "a non-owner cannot add or promote a member through the API",
+        "unknown handle, duplicate member and invalid role are explicit API errors"
       ],
       "allowed_scope": [
-        "apps/web/app/(main)/projects/[id]/settings/**",
-        "apps/web/lib/projects.ts",
-        "apps/web/lib/projects.test.mjs",
-        "apps/web/lib/i18n.ts",
-        "apps/web/lib/i18n.test.mjs",
         "cmd/api/projectshttp/**",
         "internal/application/projects/**",
         "internal/persistence/queries/projects.sql",
         "internal/persistence/sqlc/**",
-        "tests/web-v2/**",
         "internal/persistence/project_store.go",
         "internal/persistence/project_settings_store.go",
         "internal/persistence/memstore/projects.go",
@@ -12192,7 +12186,7 @@
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。 Supervisor L1 扩展：成员写入必须经 internal/persistence 的 ProjectStore 与 memstore，并登记 ops/contract/route-inventory.json；不新增权限动作，审计复用 project.member_role_changed（before=无，after=角色）。不做迁移，不 seed 成员，不 widening visibility。"
+      "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。 Supervisor L1 扩展：成员写入必须经 internal/persistence 的 ProjectStore 与 memstore，并登记 ops/contract/route-inventory.json；不新增权限动作，审计复用 project.member_role_changed（before=无，after=角色）。不做迁移，不 seed 成员，不 widening visibility。 本片只做后端 API/Store；Settings UI 与浏览器旅程在 T1338。"
     },
     {
       "id": "T1336",
@@ -12304,6 +12298,62 @@
         "docs/42_PAGE_SPECS.md"
       ],
       "supervisor_scope_narrowing": "只交付本片对象族；共享 research 页/表单基础设施沿用 T1307，不重写。i18n 只加本片键；不得实现其他对象族。"
+    },
+    {
+      "id": "T1338",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-03 补口前端：项目 Settings 成员邀请 UI + 浏览器旅程",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-03",
+      "dependencies": [
+        "T1335"
+      ],
+      "requirements": [
+        "在项目 Settings 增加成员邀请表单（handle + role），调用 T1335 的 API；未知/重复/非法角色显示字段错误。",
+        "owner/maintainer 可见邀请控件，其他角色不可见/不可用；角色修改沿用现有 UI。",
+        "tests/web-v2 journey：A 邀请 B；B 登录后 Home 可见项目并能打开项目页；B 不能提升自己；非成员不能邀请。"
+      ],
+      "deliverables": [
+        "项目 Settings 成员邀请 UI",
+        "tests/web-v2 成员邀请旅程与证据"
+      ],
+      "acceptance_criteria": [
+        "A 通过网页把 B 加为 Contributor；B 重登入可见项目；非授权角色不能邀请/提权；错误有字段提示。"
+      ],
+      "tests": [
+        "the owner invites an existing account by handle through project Settings and the invitee sees the project",
+        "a non-owner cannot invite or promote a member through the UI",
+        "unknown handle, duplicate member and invalid role show field errors"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/settings/**",
+        "apps/web/lib/projects.ts",
+        "apps/web/lib/projects.test.mjs",
+        "apps/web/lib/i18n.ts",
+        "apps/web/lib/i18n.test.mjs",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "infra/migrations/**",
+        "cmd/**",
+        "internal/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/04_USERS_ROLES.md",
+        "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "只做 Settings UI 与旅程；后端由 T1335 提供。不得自行改权限规则或 seed 成员；i18n 只加本片键。"
     }
   ]
 }
