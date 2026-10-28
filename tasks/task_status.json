@@ -12949,9 +12949,12 @@
       ]
     },
     "T1304": {
-      "status": "running",
-      "started_at": "2026-10-27T08:34:14Z",
-      "worker_run_id": "run-8bd5e454ecd7d6c4",
+      "status": "merged",
+      "started_at": "2026-10-28T01:34:32Z",
+      "worker_run_id": "run-634a2865c15414f2",
+      "accepted_by_supervisor_at": "2026-10-28T03:30:58Z",
+      "merged_at": "2026-10-28T03:44:13Z",
+      "rejection_reason": "One major finding must be fixed before merge; no code review of the rest is\nneeded.\n\norganization-members.tsx:90 — `inviteVerified` is initialised to true and always\nsent, so the ordinary invite path records verified=true without the owner making\na deliberate statement. The backend default is unverified, and the verified\nflag is publicly displayed. Change the form default to false: the owner must\nexplicitly check the box to assert a verified affiliation. Keep the checkbox\ncopy honest. Add/adjust the U02 journey or unit assertion so the default invite\nis recorded unverified, and the explicit checked path is the only way to get\nverified=true.\n\nAlso narrow the evidence sentence about V's ended row: the step asserts ended\nstatus, role, 'Left' date and no role control; it does not compare the start\ndate. Say what it measures.\n\nRe-run web typecheck/lint/unit and make web-v2; record exact outputs.\n",
       "history": [
         {
           "from": "todo",
@@ -12965,13 +12968,76 @@
           "at": "2026-10-27T08:34:14Z",
           "run_id": "run-8bd5e454ecd7d6c4",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T08:47:46Z",
+          "run_id": "run-7468a00aaf8315ff",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-27T09:23:04Z",
+          "run_id": "run-e849edd36180f78e",
+          "reason": "G2 is red only on sast-node (the observability scrape-grid jitter is load, not\nyour code). Fix the four object-injection findings in the new organization\nfiles:\n\n  apps/web/app/(main)/organizations/org-client.ts:147:24\n  apps/web/app/(main)/organizations/organization-members.tsx:142:43\n  apps/web/app/(main)/organizations/organization-members.tsx:161:45\n  apps/web/app/(main)/organizations/organization-members.tsx:171:12\n\nReplace dynamic property access with Object.entries / a Map / an explicit\nallow-list (the same pattern used in the WEB-02 /status fix); do not baseline\nnew code and do not disable the rule. Re-run\n`bash tests/security/sast.sh node` -> 0 unbaselined, plus web typecheck/lint/unit\nand `make web-v2`; record exact outputs in RESULT.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T09:23:05Z",
+          "run_id": "run-c9baeb37145cc679",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T09:28:00Z",
+          "run_id": "run-d630823f137227b1",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-28T01:34:24Z",
+          "run_id": "run-bdc2fbc66e3e8a59",
+          "reason": "One major finding must be fixed before merge; no code review of the rest is\nneeded.\n\norganization-members.tsx:90 — `inviteVerified` is initialised to true and always\nsent, so the ordinary invite path records verified=true without the owner making\na deliberate statement. The backend default is unverified, and the verified\nflag is publicly displayed. Change the form default to false: the owner must\nexplicitly check the box to assert a verified affiliation. Keep the checkbox\ncopy honest. Add/adjust the U02 journey or unit assertion so the default invite\nis recorded unverified, and the explicit checked path is the only way to get\nverified=true.\n\nAlso narrow the evidence sentence about V's ended row: the step asserts ended\nstatus, role, 'Left' date and no role control; it does not compare the start\ndate. Say what it measures.\n\nRe-run web typecheck/lint/unit and make web-v2; record exact outputs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T01:34:32Z",
+          "run_id": "run-634a2865c15414f2",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T01:40:58Z",
+          "run_id": "run-54d04780f430e764",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-28T03:30:58Z",
+          "run_id": "run-7443ca2f2f7a1745"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-28T03:44:13Z",
+          "run_id": "run-a3e2ec723f02853e",
+          "reason": "pr merge via rddev (four gates green)"
         }
       ]
     },
     "T1305": {
-      "status": "running",
-      "started_at": "2026-10-27T08:34:16Z",
-      "worker_run_id": "run-045024adcaa83739",
+      "status": "verification",
+      "started_at": "2026-10-27T10:11:06Z",
+      "worker_run_id": "run-b269c1c461040ba5",
+      "rejection_reason": "G2 red on sast-node and on the WEB-04 journey's duplicate-address assertion\n(the observability scrape-grid jitter is load, not yours).\n\n1) sast-node — fix without baselining:\n   apps/web/lib/i18n.ts:1336:17, :1336:37, :1337:17, :1343:25\n   apps/web/lib/projects.ts:296:24\n   Use Object.entries / a Map / an explicit allow-list; re-run\n   `bash tests/security/sast.sh node` -> 0 unbaselined.\n\n2) WEB-04 journey — the restored run fails:\n   \"the duplicate address did not answer 409 from POST /api/v1/projects\n    (observed no response)\".\n   The acceptance criterion is: duplicate address shows a field error and no\n   second project is created. If the form legitimately blocks client-side, the\n   journey must assert the visible field error and the project count staying 1,\n   not demand an API 409. If it does submit and receives 409, assert that and\n   the field error. Either way, the restored tree must be green for the real\n   product behaviour; do not weaken the assertion to nothing.\n\n3) Re-run `make web-v2` (all journeys), `make web-v2-mutation`,\n   `make web-v2-unit`, web typecheck/lint/unit and sast-node; record exact\n   commands/outputs in RESULT. Do not touch .github/specs/docs.\n",
       "history": [
         {
           "from": "todo",
@@ -12985,6 +13051,48 @@
           "at": "2026-10-27T08:34:16Z",
           "run_id": "run-045024adcaa83739",
           "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-27T08:40:07Z",
+          "run_id": "run-024d4ccf90394aa5",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T08:40:35Z",
+          "run_id": "run-48f739aff9c605ff",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-27T08:51:51Z",
+          "run_id": "run-c95a5a2220273f7a",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-27T10:11:05Z",
+          "run_id": "run-a7a1decc34cb7fc3",
+          "reason": "G2 red on sast-node and on the WEB-04 journey's duplicate-address assertion\n(the observability scrape-grid jitter is load, not yours).\n\n1) sast-node — fix without baselining:\n   apps/web/lib/i18n.ts:1336:17, :1336:37, :1337:17, :1343:25\n   apps/web/lib/projects.ts:296:24\n   Use Object.entries / a Map / an explicit allow-list; re-run\n   `bash tests/security/sast.sh node` -> 0 unbaselined.\n\n2) WEB-04 journey — the restored run fails:\n   \"the duplicate address did not answer 409 from POST /api/v1/projects\n    (observed no response)\".\n   The acceptance criterion is: duplicate address shows a field error and no\n   second project is created. If the form legitimately blocks client-side, the\n   journey must assert the visible field error and the project count staying 1,\n   not demand an API 409. If it does submit and receives 409, assert that and\n   the field error. Either way, the restored tree must be green for the real\n   product behaviour; do not weaken the assertion to nothing.\n\n3) Re-run `make web-v2` (all journeys), `make web-v2-mutation`,\n   `make web-v2-unit`, web typecheck/lint/unit and sast-node; record exact\n   commands/outputs in RESULT. Do not touch .github/specs/docs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-27T10:11:06Z",
+          "run_id": "run-b269c1c461040ba5",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-28T01:34:06Z",
+          "run_id": "run-f9974420d6eaa005",
+          "reason": "collect: all checks passed"
         }
       ]
     },
