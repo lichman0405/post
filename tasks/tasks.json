@@ -12166,7 +12166,14 @@
         "internal/application/projects/**",
         "internal/persistence/queries/projects.sql",
         "internal/persistence/sqlc/**",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "internal/persistence/project_store.go",
+        "internal/persistence/project_settings_store.go",
+        "internal/persistence/memstore/projects.go",
+        "ops/contract/route-inventory.json",
+        "cmd/api/validationhttp/visibility_test.go",
+        "cmd/api/fileshttp/files_test.go",
+        "cmd/api/gittokenshttp/git_tokens_test.go"
       ],
       "forbidden_scope": [
         ".git/**",
@@ -12185,7 +12192,7 @@
         "docs/12_PERMISSIONS_RIGHTS_POLICY.md",
         "docs/42_PAGE_SPECS.md"
       ],
-      "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。"
+      "supervisor_scope_narrowing": "这是用户裁定的 A：项目成员必须由 owner/maintainer 通过网页按 handle 添加现有账号并选角色。复用 project_memberships 与现有角色校验，不新增权限动作、不做组织成员自动映射、不 seed 成员。若发现权限矩阵缺口，记录并停下等 L3，不得自行扩权。 Supervisor L1 扩展：成员写入必须经 internal/persistence 的 ProjectStore 与 memstore，并登记 ops/contract/route-inventory.json；不新增权限动作，审计复用 project.member_role_changed（before=无，after=角色）。不做迁移，不 seed 成员，不 widening visibility。"
     },
     {
       "id": "T1336",
