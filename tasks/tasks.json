@@ -12383,9 +12383,9 @@
         "the accepted-main overview still renders for a project that has a main branch"
       ],
       "allowed_scope": [
-        "apps/web/app/(main)/projects/[id]/page.tsx",
         "cmd/api/rsghttp/overview.go",
-        "tests/web-v2/**"
+        "tests/web-v2/**",
+        "apps/web/app/(main)/projects/[id]/**"
       ],
       "forbidden_scope": [
         ".git/**",
