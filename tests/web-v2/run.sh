@@ -303,6 +303,19 @@ if ! node "$V2_DIR/journey-web05-overview.mjs" "$BASE"; then
   fail "the WEB-05 overview (T1339) browser journey failed (evidence: $EVIDENCE_DIR/web05-overview)"
 fi
 
+# ---- 15. WEB-03 browser journey (project Settings: invite by handle) --------
+# Creates its own private project and three accounts through the product's
+# forms, so it runs after the journeys that assert a new account's empty
+# directory — and after T1339's overview journey, because it reaches Settings
+# through the project page (directory row -> overview -> Settings tab), which
+# is the page T1339 fixed for a project with no main branch. Its own evidence
+# goes under $EVIDENCE_DIR/web03-settings.
+echo "== web-v2: browser journey (WEB-03 settings: invite by handle, field errors, role gates) =="
+if ! node "$V2_DIR/journey-web03-settings.mjs" "$BASE"; then
+  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+  fail "the WEB-03 (project Settings) browser journey failed (evidence: $EVIDENCE_DIR/web03-settings)"
+fi
+
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
 cat > "$EVIDENCE_DIR/runner.json" <<EOF
 {
@@ -315,7 +328,8 @@ cat > "$EVIDENCE_DIR/runner.json" <<EOF
   "evidence_dir": "$EVIDENCE_DIR",
   "u02_evidence_dir": "$U02_EVIDENCE_DIR",
   "web05_evidence_dir": "$EVIDENCE_DIR/web05",
-  "web05_overview_evidence_dir": "$EVIDENCE_DIR/web05-overview"
+  "web05_overview_evidence_dir": "$EVIDENCE_DIR/web05-overview",
+  "web03_settings_evidence_dir": "$EVIDENCE_DIR/web03-settings"
 }
 EOF
 echo "web-v2: PASSED — evidence in $EVIDENCE_DIR"

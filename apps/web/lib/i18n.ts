@@ -699,6 +699,24 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     "search.sourceVersion": "version {version}",
     "search.sourceProject": "project {projectId}",
     "search.factors.summary": "Ranking factors ({count})",
+    // T1338: the project Settings add-member form. A member joins at a
+    // chosen role by typing the handle of an ALREADY EXISTING account (V1
+    // has no pending invitations for addresses without an account — the
+    // same decision the organization invite took). The refusal sentences
+    // (unknown handle, duplicate member, invalid role) live with the other
+    // refusal copy in lib/projects.ts, not here.
+    "projects.settings.invite.title": "Add member",
+    "projects.settings.invite.desc":
+      "Add an existing account by its handle. The person must already have a POST account; invitations to addresses without one are not offered.",
+    "projects.settings.invite.handleLabel": "Account handle",
+    "projects.settings.invite.handleHint":
+      "The handle of an existing account, without the @ prefix.",
+    "projects.settings.invite.roleLabel": "Role",
+    "projects.settings.invite.rolePlaceholder": "Choose a role",
+    "projects.settings.invite.submit": "Add member",
+    "projects.settings.invite.adding": "Adding…",
+    "projects.settings.invite.added": "Added @{handle} as {role}.",
+    "projects.settings.invite.failed": "The member could not be added. Please try again.",
   },
   "zh-CN": {
     /* ---- app shell ---- */
@@ -1225,6 +1243,18 @@ export const MESSAGES: Record<Locale, Record<string, string>> = {
     "search.sourceVersion": "版本 {version}",
     "search.sourceProject": "项目 {projectId}",
     "search.factors.summary": "排序因子（{count}）",
+    // T1338: 项目 Settings 的添加成员表单（见英文表同一段的说明）。
+    "projects.settings.invite.title": "添加成员",
+    "projects.settings.invite.desc":
+      "按账号句柄添加一个已有账号。对方必须已经拥有 POST 账号；平台不提供邀请未注册邮箱地址的能力。",
+    "projects.settings.invite.handleLabel": "账号句柄",
+    "projects.settings.invite.handleHint": "已有账号的句柄，不带 @ 前缀。",
+    "projects.settings.invite.roleLabel": "角色",
+    "projects.settings.invite.rolePlaceholder": "选择角色",
+    "projects.settings.invite.submit": "添加成员",
+    "projects.settings.invite.adding": "添加中…",
+    "projects.settings.invite.added": "已将 @{handle} 添加为 {role}。",
+    "projects.settings.invite.failed": "无法添加该成员，请重试。",
   },
 };
 

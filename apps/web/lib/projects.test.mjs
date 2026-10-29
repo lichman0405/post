@@ -15,6 +15,8 @@ import {
   ApiError,
   createFieldForError,
   createProjectsClient,
+  inviteFieldForError,
+  inviteMessageForError,
   mayManageSettings,
   messageForProjectCode,
   projectNameProblem,
@@ -232,6 +234,115 @@ test("setMemberRole without a token provider sends no CSRF header", async () => 
   assert.equal(calls[0].headers["X-CSRF-Token"], undefined);
 });
 
+test("addMember POSTs the handle and role with the CSRF token and decodes the 201", async () => {
+  const { fetchFn, calls } = fakeFetch({
+    [`POST /api/v1/projects/${PROJECT.id}/members`]: async () => ({
+      status: 201,
+      json: async () => ({ ...MEMBERSHIP, user_id: MEMBERS[1].user_id, role: "contributor" }),
+    }),
+  });
+  const client = createProjectsClient(API, {
+    fetch: fetchFn,
+    csrfToken: () => "session-token-3",
+  });
+  const added = await client.addMember(PROJECT.id, { handle: "bob", role: "contributor" });
+  assert.equal(added.user_id, MEMBERS[1].user_id);
+  assert.equal(added.role, "contributor");
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].path, `/api/v1/projects/${PROJECT.id}/members`);
+  assert.equal(calls[0].headers["X-CSRF-Token"], "session-token-3");
+  assert.deepEqual(JSON.parse(calls[0].body), { handle: "bob", role: "contributor" });
+});
+
+test("addMember surfaces the invite refusals as ApiError with their codes", async () => {
+  const refusals = [
+    ["USER_NOT_FOUND", 404, "projects: user not found"],
+    ["MEMBER_ALREADY_EXISTS", 409, "projects: user is already a member"],
+    ["VALIDATION_FAILED", 400, "projects: invalid input: role must be owner, maintainer, contributor or viewer"],
+    ["OWNER_ROLE_CHANGE_FORBIDDEN", 403, "projects: only owners manage the owner role"],
+  ];
+  for (const [code, status, message] of refusals) {
+    const { fetchFn } = fakeFetch({
+      [`POST /api/v1/projects/${PROJECT.id}/members`]: async () => ({
+        status,
+        json: async () => ({ code, message }),
+      }),
+    });
+    const client = createProjectsClient(API, { fetch: fetchFn });
+    await assert.rejects(
+      () => client.addMember(PROJECT.id, { handle: "bob", role: "viewer" }),
+      (err) => err instanceof ApiError && err.code === code && err.status === status,
+      `${code} must reach the form as an ApiError`,
+    );
+  }
+});
+
+test("inviteFieldForError puts each invite refusal on the field that caused it", () => {
+  const cases = [
+    [new ApiError(404, { code: "USER_NOT_FOUND", message: "projects: user not found" }), "handle"],
+    [
+      new ApiError(409, { code: "MEMBER_ALREADY_EXISTS", message: "projects: user is already a member" }),
+      "handle",
+    ],
+    [
+      // The REAL wire message: ErrValidation plus the service's role rule.
+      new ApiError(400, {
+        code: "VALIDATION_FAILED",
+        message: "projects: invalid input: role must be owner, maintainer, contributor or viewer",
+      }),
+      "role",
+    ],
+    [
+      new ApiError(400, { code: "VALIDATION_FAILED", message: "projects: invalid input: handle is required" }),
+      "handle",
+    ],
+    [
+      new ApiError(403, {
+        code: "OWNER_ROLE_CHANGE_FORBIDDEN",
+        message: "projects: only owners manage the owner role",
+      }),
+      "role",
+    ],
+    // A VALIDATION_FAILED rule that names neither field is form-level: null
+    // says so instead of guessing a control the reader would not recognise.
+    [new ApiError(400, { code: "VALIDATION_FAILED", message: "projects: invalid input: malformed body" }), null],
+    [new ApiError(403, { code: "SETTINGS_FORBIDDEN", message: "projects: settings action not allowed" }), null],
+    [new Error("network down"), null],
+    [null, null],
+  ];
+  for (const [err, expected] of cases) {
+    assert.equal(inviteFieldForError(err), expected, `${err?.code ?? "non-ApiError"}`);
+  }
+});
+
+test("inviteMessageForError names the field's own problem", () => {
+  const unknown = new ApiError(404, { code: "USER_NOT_FOUND", message: "projects: user not found" });
+  assert.match(inviteMessageForError(unknown, "handle"), /no account uses that handle/i);
+
+  const duplicate = new ApiError(409, {
+    code: "MEMBER_ALREADY_EXISTS",
+    message: "projects: user is already a member",
+  });
+  assert.match(inviteMessageForError(duplicate, "handle"), /already a member/i);
+
+  const badRole = new ApiError(400, {
+    code: "VALIDATION_FAILED",
+    message: "projects: invalid input: role must be owner, maintainer, contributor or viewer",
+  });
+  assert.match(inviteMessageForError(badRole, "role"), /not a valid role/i);
+
+  const blankHandle = new ApiError(400, {
+    code: "VALIDATION_FAILED",
+    message: "projects: invalid input: handle is required",
+  });
+  assert.match(inviteMessageForError(blankHandle, "handle"), /enter the handle/i);
+
+  // A code the module does not know still yields a sentence about the WRITE.
+  const unknownCode = new ApiError(500, { code: "WHATEVER", message: "boom" });
+  assert.match(inviteMessageForError(unknownCode, "handle"), /could not be added/i);
+  assert.match(inviteMessageForError(new Error("network"), "role"), /could not be added/i);
+});
+
 test("updateSettings PATCHes only the fields the caller sent", async () => {
   const { fetchFn, calls } = fakeFetch({
     [`PATCH /api/v1/projects/${PROJECT.id}`]: async () =>
@@ -443,6 +554,8 @@ test("messageForProjectCode maps the stable codes", () => {
   assert.match(messageForProjectCode("LAST_OWNER"), /at least one owner/);
   assert.match(messageForProjectCode("SELF_ROLE_CHANGE_FORBIDDEN"), /your own role/);
   assert.match(messageForProjectCode("OWNER_ROLE_CHANGE_FORBIDDEN"), /grant or revoke the owner role/);
+  assert.match(messageForProjectCode("USER_NOT_FOUND"), /no account uses that handle/i);
+  assert.match(messageForProjectCode("MEMBER_ALREADY_EXISTS"), /already a member/i);
   assert.match(messageForProjectCode("VISIBILITY_CHANGE_NOT_SUPPORTED"), /not available yet/);
   assert.match(messageForProjectCode("CSRF_FAILED"), /Reload the page/);
   assert.match(messageForProjectCode("WHATEVER"), /went wrong/);

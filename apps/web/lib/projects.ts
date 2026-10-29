@@ -52,6 +52,17 @@ export interface ProjectMember {
   joined_at: string;
 }
 
+/**
+ * The add-member input (T1338): an EXISTING account, named by its handle,
+ * and the role it joins at. V1 has no pending invitations for addresses
+ * without an account (the same decision the organization invite took), so
+ * the API resolves the handle to a user and refuses an unknown one.
+ */
+export interface AddMemberInput {
+  handle: string;
+  role: ProjectRole;
+}
+
 /** The API error envelope (docs/22 §5): stable codes, no stack traces. */
 export interface ErrorEnvelope {
   code: string;
@@ -112,18 +123,80 @@ export type CreateField = "slug" | "name" | "purpose" | "visibility";
  */
 const VALIDATION_RULE_MARKER = "invalid input: ";
 
+/**
+ * validationRule extracts the service's own rule phrase from a
+ * VALIDATION_FAILED message. The wire text is `projects: invalid input:
+ * <rule>` (ErrValidation's text plus the service's `%w: …` rule), so the
+ * rule is read AFTER the marker; a message without the marker is returned
+ * whole, which is how the create mapping has always read it.
+ */
+function validationRule(message: string): string {
+  const text = message.toLowerCase();
+  const markerAt = text.indexOf(VALIDATION_RULE_MARKER);
+  return markerAt >= 0 ? text.slice(markerAt + VALIDATION_RULE_MARKER.length) : text;
+}
+
 export function createFieldForError(err: unknown): CreateField | null {
   if (!(err instanceof ApiError)) return null;
   if (err.code === "PROJECT_SLUG_TAKEN") return "slug";
   if (err.code !== "VALIDATION_FAILED") return null;
-  const text = err.message.toLowerCase();
-  const markerAt = text.indexOf(VALIDATION_RULE_MARKER);
-  const rule = markerAt >= 0 ? text.slice(markerAt + VALIDATION_RULE_MARKER.length) : text;
+  const rule = validationRule(err.message);
   if (rule.startsWith("slug may only contain")) return "slug";
   if (rule.startsWith("name is required")) return "name";
   if (rule.startsWith("purpose is required")) return "purpose";
   if (rule.startsWith("visibility must be")) return "visibility";
   return null;
+}
+
+/**
+ * The add-member form field an invite refusal belongs to, or null for a
+ * form-level message (T1338's requirement: an unknown handle, a duplicate
+ * member and an invalid role are reported ON their field).
+ *
+ * The API answers stable codes, not field names. Two refusals are the
+ * handle's: USER_NOT_FOUND (no such account) and MEMBER_ALREADY_EXISTS
+ * (the account is already in the project — never a silent role change).
+ * OWNER_ROLE_CHANGE_FORBIDDEN is the role's: a maintainer may not add
+ * anyone as owner. VALIDATION_FAILED reaches the wire as
+ * `projects: invalid input: <rule>`, so the rule decides: the role rule
+ * (`role must be …`) and the handle rule (`handle is required`) have one
+ * field each; anything else is form-level and null says so rather than
+ * guessing.
+ */
+export type InviteField = "handle" | "role";
+
+export function inviteFieldForError(err: unknown): InviteField | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.code === "USER_NOT_FOUND" || err.code === "MEMBER_ALREADY_EXISTS") return "handle";
+  if (err.code === "OWNER_ROLE_CHANGE_FORBIDDEN") return "role";
+  if (err.code !== "VALIDATION_FAILED") return null;
+  const rule = validationRule(err.message);
+  if (rule.startsWith("role must be")) return "role";
+  if (rule.startsWith("handle is required")) return "handle";
+  return null;
+}
+
+/**
+ * The sentence the invite form shows under `field`. Refusal-path copy
+ * lives with the other refusal messages (messageForProjectCode) rather
+ * than in the catalog, exactly as the settings page already renders the
+ * role-change refusals; the two VALIDATION_FAILED rules get the field's
+ * own sentence because "invalid input" says nothing to a reader.
+ */
+export function inviteMessageForError(err: unknown, field: InviteField): string {
+  if (err instanceof ApiError) {
+    if (err.code === "VALIDATION_FAILED") {
+      const rule = validationRule(err.message);
+      if (field === "role" && rule.startsWith("role must be")) {
+        return "That is not a valid role. Choose owner, maintainer, contributor or viewer.";
+      }
+      if (field === "handle" && rule.startsWith("handle is required")) {
+        return "Enter the handle of an existing account.";
+      }
+    }
+    return messageForProjectCode(err.code, "The member could not be added. Please try again.");
+  }
+  return "The member could not be added. Please try again.";
 }
 
 /** One organization the create form can put a project in (the caller's). */
@@ -253,6 +326,16 @@ export interface ProjectsClient {
    * rides along when the page provided one.
    */
   setMemberRole(projectId: string, userId: string, role: ProjectRole): Promise<ProjectMembership>;
+  /**
+   * Add an existing account, named by its handle, at the chosen role
+   * (POST /api/v1/projects/{id}/members, T1335's invite endpoint; this
+   * client method is T1338). Owner/maintainer only; the API refuses an
+   * unknown handle (USER_NOT_FOUND), an existing member
+   * (MEMBER_ALREADY_EXISTS), an invalid role (VALIDATION_FAILED) and, for
+   * a maintainer, the owner role (OWNER_ROLE_CHANGE_FORBIDDEN) — see
+   * inviteFieldForError. A 201 answers the new membership.
+   */
+  addMember(projectId: string, input: AddMemberInput): Promise<ProjectMembership>;
   /**
    * Edit the project purpose and/or activity status. Visibility is
    * preview-only: sending it answers VISIBILITY_CHANGE_NOT_SUPPORTED, so
@@ -483,6 +566,15 @@ export function createProjectsClient(
       }
       return body.members.map(asMember);
     },
+    async addMember(projectId, input) {
+      const result = await call(
+        "POST",
+        `/api/v1/projects/${encodeURIComponent(projectId)}/members`,
+        { handle: input.handle, role: input.role },
+      );
+      if (result.status >= 400) fail(result.status, result.body);
+      return asMembership(result.body);
+    },
     async setMemberRole(projectId, userId, role) {
       const result = await call(
         "PUT",
@@ -548,6 +640,10 @@ export function messageForProjectCode(
       return "You cannot change your own role.";
     case "OWNER_ROLE_CHANGE_FORBIDDEN":
       return "Only an owner can grant or revoke the owner role.";
+    case "USER_NOT_FOUND":
+      return "No account uses that handle. Check the spelling and try again.";
+    case "MEMBER_ALREADY_EXISTS":
+      return "That account is already a member of this project.";
     case "VISIBILITY_CHANGE_NOT_SUPPORTED":
       return "Changing visibility is not available yet.";
     case "CSRF_FAILED":

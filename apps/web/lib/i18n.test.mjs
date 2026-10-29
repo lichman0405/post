@@ -370,3 +370,39 @@ test("the research-browse copy is one block of catalog keys, in both locales", (
     }
   }
 });
+
+test("the project Settings invite copy is one block of catalog keys, in both locales", () => {
+  // T1338 puts an add-member form on the project Settings tab. Its visible
+  // copy is appended as one block to lib/i18n.ts; this pins the SET, so a
+  // key renamed on one side of the catalog cannot leave a blank label on
+  // the form (the parity test above only catches a one-sided addition).
+  const keys = [
+    "projects.settings.invite.title",
+    "projects.settings.invite.desc",
+    "projects.settings.invite.handleLabel",
+    "projects.settings.invite.handleHint",
+    "projects.settings.invite.roleLabel",
+    "projects.settings.invite.rolePlaceholder",
+    "projects.settings.invite.submit",
+    "projects.settings.invite.adding",
+    "projects.settings.invite.added",
+    "projects.settings.invite.failed",
+  ];
+  const catalogs = new Map(
+    Object.entries(MESSAGES).map(([locale, table]) => [locale, new Map(Object.entries(table))]),
+  );
+  for (const key of keys) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key);
+      assert.equal(typeof value, "string", `${locale} is missing ${key}`);
+      assert.notEqual(value.trim(), "", `${locale}:${key} is empty`);
+    }
+  }
+  // The success sentence names the added account and its role: a placeholder
+  // lost in translation makes the confirmation name nothing.
+  for (const locale of LOCALES) {
+    const added = catalogs.get(locale)?.get("projects.settings.invite.added") ?? "";
+    assert.ok(added.includes("{handle}"), `${locale}:invite.added lost {handle}`);
+    assert.ok(added.includes("{role}"), `${locale}:invite.added lost {role}`);
+  }
+});

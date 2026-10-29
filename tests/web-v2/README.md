@@ -77,6 +77,32 @@ project's main branch *does* have commits, so the second half proves the fix
 did not hide the accepted-main line for projects that have one. Evidence goes
 to `<run>/web05-overview/`.
 
+### The project-Settings slice (WEB-03, T1338): invite by handle
+
+`journey-web03-settings.mjs` is the project Settings half of WEB-03 (the U02
+slice above is the organization half). Three accounts and three isolated
+browser contexts:
+
+| Step | What the browser does | What is asserted |
+|---|---|---|
+| `signup-owner-a` ... `signup-nonmember-c` | A, B and C establish their own accounts through the product's `/login`; A creates a **private** project through `/projects`' own form | `POST /auth/signup` for each; `POST /api/v1/projects` → 201 and the private badge |
+| `owner-opens-project-settings` | A opens the directory row, the project page and its Settings tab | the Settings tab exists for the owner, the invite form renders, the member list read is a 200 |
+| `invite-unknown-handle-shows-field-error` | A submits a handle no account carries | `POST .../members` → **404** `USER_NOT_FOUND`; the sentence is under the handle field, the input is `aria-invalid`, the role field stays clean, nobody was added |
+| `invite-without-role-shows-field-error` | A submits with the role placeholder still selected | `POST .../members` → **400** `VALIDATION_FAILED` (the role rule); the sentence is under the role field, the handle field stays clean |
+| `owner-invites-b-as-contributor` | A invites B by handle as contributor | `POST .../members` → 201, B's row appears with a contributor role control, the form resets to empty |
+| `duplicate-member-shows-field-error` | A adds B again as viewer | **409** `MEMBER_ALREADY_EXISTS` under the handle; B's row is still contributor (no silent role change) |
+| `b-sees-project-on-home-after-invite` | B reloads Home and opens the project | the **private** project is listed for B (200 `GET /api/v1/projects`), the row links to the project, and the project page opens with its name |
+| `contributor-cannot-invite-or-promote` | B looks for Settings, then types the Settings URL | no Settings tab; `data-settings-unauthorized`; no invite form, no role control, and no write request |
+| `nonmember-cannot-reach-invite` | C looks at Home, the project URL and the Settings URL | the private project is not listed; the project URL answers the existence-hiding **404** and the neutral not-found state; the Settings URL offers no invite form and issues no write |
+
+The private visibility is load-bearing: a public project would appear on B's
+Home regardless of membership, so it could not prove the invite worked. The
+allowed console lines are the 401 on each new context's first
+`GET /auth/session`, the 404/400/409 of the three deliberate refusals on
+`POST .../members`, and C's 404 on the project and membership reads — each is
+asserted by the step that produced it. Its evidence goes under
+`<run>/web03-settings/`.
+
 ## Run it
 
 ```bash
@@ -224,6 +250,8 @@ tests/web-v2/
   mutation-check.sh      the required red/green proof
   journey.mjs            the U01 browser journey (steps, evidence)
   journey-u02.mjs        the U02 (WEB-03) journey: org creation, invites, roles, leave
+  journey-web03-settings.mjs  the project Settings (WEB-03) journey: invite by handle,
+                              field errors, role gates, non-member hiding
   entrypoint-check.mjs   sign-in form + account-establishment entry pre-flight
   harness/main.go        isolated real API (production auth surface)
   lib/steps.mjs          step accounting (a skipped step fails)

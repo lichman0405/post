@@ -1,0 +1,98 @@
+/* Add-member form on the project Settings tab (T1338).
+ *
+ * The section frame, titles, notes and notices are the settings page's own
+ * (projects.css, T0109). This file holds only what the invite form adds: the
+ * one-row field layout, its controls, and the three things a form needs that
+ * the page did not have before — a per-field hint line, a per-field error
+ * line, and a submit that sits at the fields' baseline. Primer's neutral
+ * palette; no colour the page does not already use.
+ */
+
+.settings-invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-invite-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-invite-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-invite-input,
+.settings-invite-select {
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #ffffff);
+}
+
+.settings-invite-input {
+  width: 240px;
+}
+
+.settings-invite-select {
+  width: 160px;
+}
+
+.settings-invite-input:focus,
+.settings-invite-select:focus {
+  border-color: var(--fgColor-accent, #0969da);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bgColor-accent-muted, #ddf4ff);
+}
+
+.settings-invite-input[aria-invalid="true"],
+.settings-invite-select[aria-invalid="true"] {
+  border-color: var(--borderColor-danger-emphasis, #cf222e);
+}
+
+.settings-field-hint {
+  max-width: 280px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--fgColor-muted, #59636e);
+}
+
+.settings-field-error {
+  max-width: 280px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.settings-invite-submit {
+  align-self: flex-start;
+  margin-top: 20px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fgColor-onEmphasis, #ffffff);
+  background: var(--bgColor-success-emphasis, #1f883d);
+  cursor: pointer;
+}
+
+.settings-invite-submit:hover:not(:disabled) {
+  background: var(--bgColor-success-emphasis, #1a7f37);
+}
+
+.settings-invite-submit:disabled {
+  color: var(--fgColor-muted, #59636e);
+  background: var(--bgColor-muted, #f6f8fa);
+  border-color: var(--borderColor-default, #d0d7de);
+  cursor: default;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AlertIcon, CheckIcon, InfoIcon } from "@primer/octicons-react";
 import { Spinner } from "@primer/react";
 
@@ -8,13 +8,18 @@ import { createAuthClient } from "../../../../../lib/auth";
 import {
   ApiError,
   createProjectsClient,
+  inviteFieldForError,
+  inviteMessageForError,
   mayManageSettings,
   messageForProjectCode,
   type ProjectMember,
+  type ProjectMembership,
   type ProjectRole,
 } from "../../../../../lib/projects";
+import { useT } from "../../../../i18n-provider";
 import { Table } from "@post/ui";
 import { useProjectShell } from "../shell-context";
+import "./settings-invite.css";
 
 /**
  * Settings tab (T0109): member management, the visibility preview and the
@@ -39,6 +44,7 @@ type Notice = { kind: "success" | "error"; text: string } | null;
 
 export default function SettingsPage() {
   const shell = useProjectShell();
+  const t = useT();
 
   const [members, setMembers] = useState<ProjectMember[] | null>(null);
   const [membersError, setMembersError] = useState<string | null>(null);
@@ -48,6 +54,16 @@ export default function SettingsPage() {
   const [activityStatus, setActivityStatus] = useState("planning");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+
+  // The add-member form (T1338). Field errors are keyed by the field the
+  // API's refusal belongs to (lib/projects inviteFieldForError), so an
+  // unknown handle lands under the handle and an invalid role under the
+  // role — never as one banner the reader has to map back onto a control.
+  const [inviteHandle, setInviteHandle] = useState("");
+  const [inviteRole, setInviteRole] = useState<ProjectRole | "">("");
+  const [inviting, setInviting] = useState(false);
+  const [inviteErrors, setInviteErrors] = useState<{ handle?: string; role?: string }>({});
+  const [inviteNotice, setInviteNotice] = useState<Notice>(null);
 
   // One auth client for the CSRF token (lib/auth's sessionTokenStorage,
   // refreshed from the API when the tab reloaded without one), and the
@@ -143,6 +159,61 @@ export default function SettingsPage() {
       });
     } finally {
       setBusyMember(null);
+    }
+  }
+
+  /**
+   * Add an existing account by handle (T1338). The API is the authority on
+   * every rule — the handle must name an account, the account must not
+   * already be a member, the role must be one of the four and a
+   * maintainer may not add an owner — and its refusal lands on the field
+   * that caused it. A success re-reads the member list rather than
+   * appending a guessed row: the 201 carries the membership, not the
+   * identity the table renders.
+   */
+  async function submitInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (projectsClient === null || inviting) return;
+    // People write handles with a leading @ in prose; the API matches the
+    // bare handle, so the form drops it before sending. The server still
+    // validates whatever arrives.
+    const handle = inviteHandle.trim().replace(/^@+/, "");
+    setInviting(true);
+    setInviteErrors({});
+    setInviteNotice(null);
+    let added: ProjectMembership;
+    try {
+      added = await projectsClient.addMember(project.id, {
+        handle,
+        role: inviteRole as ProjectRole,
+      });
+    } catch (err) {
+      const field = inviteFieldForError(err);
+      if (field === null) {
+        setInviteNotice({ kind: "error", text: inviteMessageForError(err, "handle") });
+      } else {
+        setInviteErrors({ [field]: inviteMessageForError(err, field) });
+      }
+      setInviting(false);
+      return;
+    }
+    setInviting(false);
+    // The role is a deliberate choice per member: the next invite starts
+    // from the placeholder again rather than repeating the last role.
+    setInviteHandle("");
+    setInviteRole("");
+    setInviteNotice({
+      kind: "success",
+      text: t("projects.settings.invite.added", { handle, role: added.role }),
+    });
+    try {
+      const list = await projectsClient.listMembers(project.id);
+      setMembers(list);
+      setMembersError(null);
+    } catch (err) {
+      setMembersError(
+        err instanceof ApiError ? messageForProjectCode(err.code) : "Could not load members.",
+      );
     }
   }
 
@@ -251,6 +322,106 @@ export default function SettingsPage() {
             rowAttrs={(m) => ({ "data-member-row": m.user_id })}
           />
         )}
+      </section>
+
+      <section className="settings-section" data-invite-section>
+        <h2 className="settings-section-title">{t("projects.settings.invite.title")}</h2>
+        <p className="settings-section-desc">{t("projects.settings.invite.desc")}</p>
+        <form className="settings-invite-form" data-invite-form onSubmit={submitInvite} noValidate>
+          <div className="settings-invite-field">
+            <label className="settings-invite-label" htmlFor="settings-invite-handle">
+              {t("projects.settings.invite.handleLabel")}
+            </label>
+            <input
+              id="settings-invite-handle"
+              className="settings-invite-input"
+              data-invite-handle
+              value={inviteHandle}
+              onChange={(e) => setInviteHandle(e.target.value)}
+              placeholder="@handle"
+              autoComplete="off"
+              aria-invalid={inviteErrors.handle !== undefined}
+              aria-describedby={
+                inviteErrors.handle !== undefined
+                  ? "settings-invite-handle-error"
+                  : "settings-invite-handle-hint"
+              }
+            />
+            {inviteErrors.handle !== undefined ? (
+              <p
+                className="settings-field-error"
+                id="settings-invite-handle-error"
+                data-invite-field-error="handle"
+                role="alert"
+              >
+                {inviteErrors.handle}
+              </p>
+            ) : (
+              <p className="settings-field-hint" id="settings-invite-handle-hint">
+                {t("projects.settings.invite.handleHint")}
+              </p>
+            )}
+          </div>
+          <div className="settings-invite-field">
+            <label className="settings-invite-label" htmlFor="settings-invite-role">
+              {t("projects.settings.invite.roleLabel")}
+            </label>
+            <select
+              id="settings-invite-role"
+              className="settings-invite-select"
+              data-invite-role
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as ProjectRole | "")}
+              aria-invalid={inviteErrors.role !== undefined}
+              aria-describedby={
+                inviteErrors.role !== undefined ? "settings-invite-role-error" : undefined
+              }
+            >
+              <option value="">{t("projects.settings.invite.rolePlaceholder")}</option>
+              {roleOptions.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            {inviteErrors.role !== undefined ? (
+              <p
+                className="settings-field-error"
+                id="settings-invite-role-error"
+                data-invite-field-error="role"
+                role="alert"
+              >
+                {inviteErrors.role}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="submit"
+            className="settings-invite-submit"
+            data-invite-submit
+            disabled={inviting}
+          >
+            {inviting
+              ? t("projects.settings.invite.adding")
+              : t("projects.settings.invite.submit")}
+          </button>
+        </form>
+        {inviteNotice !== null ? (
+          <div
+            className={
+              inviteNotice.kind === "success"
+                ? "settings-notice settings-notice-success"
+                : "settings-notice settings-notice-error"
+            }
+            data-invite-notice={inviteNotice.kind}
+            role={inviteNotice.kind === "success" ? "status" : "alert"}
+          >
+            {inviteNotice.kind === "success" ? (
+              <CheckIcon size={14} aria-hidden="true" />
+            ) : (
+              <AlertIcon size={14} aria-hidden="true" />
+            )}
+            {inviteNotice.text}
+          </div>
+        ) : null}
       </section>
 
       <section className="settings-section" data-visibility-section>
