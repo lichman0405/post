@@ -3110,6 +3110,26 @@
       "status": "not_run",
       "last_run": null,
       "evidence": ""
+    },
+    {
+      "id": "T1339-TEST-01",
+      "task_id": "T1339",
+      "name": "a freshly created project with no main branch opens from the project list without a pageerror",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
+    },
+    {
+      "id": "T1339-TEST-02",
+      "task_id": "T1339",
+      "name": "the accepted-main overview still renders for a project that has a main branch",
+      "gate": "task-defined",
+      "blocking": true,
+      "status": "not_run",
+      "last_run": null,
+      "evidence": ""
     }
   ]
 }

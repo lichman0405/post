@@ -13273,8 +13273,9 @@
     },
     "T1307": {
       "status": "verification",
-      "started_at": "2026-10-28T08:30:44Z",
-      "worker_run_id": "run-22ac6d97197b0992",
+      "started_at": "2026-10-28T09:46:16Z",
+      "worker_run_id": "run-7fe39f237af5e70f",
+      "rejection_reason": "Review: request_changes.\n\n1) BLOCKING — gofmt: cmd/api/rsghttp/overview.go is listed by `gofmt -l`\n(the CurrentMain pointer change did not realign the Empty field). Run\n`gofmt -w cmd/api/rsghttp/overview.go` and `make fmt-check`.\n\n2) MAJOR — silent version revert: ObjectEditorForm seeds from the selected\nversion's payload but submits expectedVersion=current_version and the whole form\nas a shallow patch, so editing ?version=1 on an object now at v2 reverts every\nfield v1 had that v2 changed. Fix by one of: only offer the editor when the\nselected version IS the current version; seed from the latest; or submit only\nthe changed fields. Add a browser/unit case that edits an Experiment or\nCalculation second version and proves nothing else reverts.\n\n3) MINOR — journey coverage: required test 3 claims versions+relations for all\nfour types, but only question/hypothesis have v2 and the relation; add a second\nversion and a relation for an experiment/calculation, or narrow the claim.\n\n4) MINOR — `run.sh --only=<journey>` prints \"web-v2: PASSED\" and writes\nresult:\"passed\" for a partial run. A filtered run must not be quoted as a full\nacceptance run: brand it in the PASSED line and set result to \"partial\", or\nfail unless the caller explicitly asks for a filtered result.\n\n5) MINOR — object page shows *** to\nviewers; hide/disable them for role=viewer (server still enforces).\n\n6) MINOR — metadata.result_outcome is an undocumented convention and shallow\nmerge drops unknown metadata keys. Preserve unknown metadata keys on update and\nrecord the convention in RESULT/notes; the Supervisor will ratify or move it to\na spec. Do not invent more undocumented keys.\n\n7) NIT — branchPayload comment vs always-present empty fields; journey comment\nabout software/parameters; RESULT wording about relations.\n\nRe-run gofmt/fmt-check, build, web typecheck/lint/unit, `make web-v2` and\nsast-node; record exact outputs.\n",
       "history": [
         {
           "from": "todo",
@@ -13314,6 +13315,27 @@
           "to": "verification",
           "at": "2026-10-28T09:00:23Z",
           "run_id": "run-3165f2406a8bc5bc",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-28T09:46:15Z",
+          "run_id": "run-1f0ddff61b213179",
+          "reason": "Review: request_changes.\n\n1) BLOCKING — gofmt: cmd/api/rsghttp/overview.go is listed by `gofmt -l`\n(the CurrentMain pointer change did not realign the Empty field). Run\n`gofmt -w cmd/api/rsghttp/overview.go` and `make fmt-check`.\n\n2) MAJOR — silent version revert: ObjectEditorForm seeds from the selected\nversion's payload but submits expectedVersion=current_version and the whole form\nas a shallow patch, so editing ?version=1 on an object now at v2 reverts every\nfield v1 had that v2 changed. Fix by one of: only offer the editor when the\nselected version IS the current version; seed from the latest; or submit only\nthe changed fields. Add a browser/unit case that edits an Experiment or\nCalculation second version and proves nothing else reverts.\n\n3) MINOR — journey coverage: required test 3 claims versions+relations for all\nfour types, but only question/hypothesis have v2 and the relation; add a second\nversion and a relation for an experiment/calculation, or narrow the claim.\n\n4) MINOR — `run.sh --only=<journey>` prints \"web-v2: PASSED\" and writes\nresult:\"passed\" for a partial run. A filtered run must not be quoted as a full\nacceptance run: brand it in the PASSED line and set result to \"partial\", or\nfail unless the caller explicitly asks for a filtered result.\n\n5) MINOR — object page shows *** to\nviewers; hide/disable them for role=viewer (server still enforces).\n\n6) MINOR — metadata.result_outcome is an undocumented convention and shallow\nmerge drops unknown metadata keys. Preserve unknown metadata keys on update and\nrecord the convention in RESULT/notes; the Supervisor will ratify or move it to\na spec. Do not invent more undocumented keys.\n\n7) NIT — branchPayload comment vs always-present empty fields; journey comment\nabout software/parameters; RESULT wording about relations.\n\nRe-run gofmt/fmt-check, build, web typecheck/lint/unit, `make web-v2` and\nsast-node; record exact outputs.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-28T09:46:16Z",
+          "run_id": "run-7fe39f237af5e70f",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-29T01:38:27Z",
+          "run_id": "run-cc0a84cefab81929",
           "reason": "collect: all checks passed"
         }
       ]
@@ -13638,6 +13660,34 @@
       "status": "todo"
     },
     "T1338": {
+      "status": "rejected",
+      "started_at": "2026-10-28T09:45:50Z",
+      "worker_run_id": "run-8f94e5fa7b75d08d",
+      "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-28T09:45:44Z",
+          "run_id": "run-eaa5bcfa5a86ef56"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-28T09:45:50Z",
+          "run_id": "run-8f94e5fa7b75d08d",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "rejected",
+          "at": "2026-10-29T01:38:41Z",
+          "run_id": "run-1127cf19cb888c5c",
+          "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        }
+      ]
+    },
+    "T1339": {
       "status": "todo"
     }
   },

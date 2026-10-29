@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "task_count": 210,
+  "task_count": 211,
   "phases": {
     "P0": "Canonical 开发环境、Orchestrator 与工程脚手架",
     "P1": "身份、组织与 Project Shell",
@@ -12354,6 +12354,56 @@
         "docs/42_PAGE_SPECS.md"
       ],
       "supervisor_scope_narrowing": "只做 Settings UI 与旅程；后端由 T1335 提供。不得自行改权限规则或 seed 成员；i18n 只加本片键。"
+    },
+    {
+      "id": "T1339",
+      "phase": "P14",
+      "phase_name": "V2 可部署团队试用版",
+      "title": "WEB-05 修复：无 main 分支的新项目打开即崩（current_main 空对象解引用）",
+      "v1_required": false,
+      "v2_required": true,
+      "web_package": "WEB-05",
+      "dependencies": [
+        "T1306"
+      ],
+      "requirements": [
+        "修复 apps/web/app/(main)/projects/[id]/page.tsx 对 overview.current_main / latest_commit 的空值解引用；无 main 分支时项目页必须正常渲染。",
+        "选择：要么页面做完整 guard，要么 cmd/api/rsghttp/overview.go 在无 main 时省略 current_main；不得改变有 main 时的显示。",
+        "新增真实旅程/单测：登录用户从 /projects 点进一个刚创建、无 main 分支的项目，页面无 pageerror；有 main 的项目仍显示 accepted main 信息。"
+      ],
+      "deliverables": [
+        "空值保护修复",
+        "新项目无 main 分支的浏览器/单元证据"
+      ],
+      "acceptance_criteria": [
+        "新建 Private 项目后从列表点入不崩；console 无 pageerror；有 main 的项目行为不变。"
+      ],
+      "tests": [
+        "a freshly created project with no main branch opens from the project list without a pageerror",
+        "the accepted-main overview still renders for a project that has a main branch"
+      ],
+      "allowed_scope": [
+        "apps/web/app/(main)/projects/[id]/page.tsx",
+        "cmd/api/rsghttp/overview.go",
+        "tests/web-v2/**"
+      ],
+      "forbidden_scope": [
+        ".git/**",
+        "CLAUDE.md",
+        "tasks/**",
+        "specs/**",
+        "docs/**",
+        ".github/**",
+        "infra/migrations/**",
+        "allowed_scope 未点名的一律不许写"
+      ],
+      "decision_level_max": "L1",
+      "relevant_specs": [
+        "docs/06_UI_UX_SPEC.md",
+        "docs/08_SCIENTIFIC_OBJECTS.md",
+        "docs/42_PAGE_SPECS.md"
+      ],
+      "supervisor_scope_narrowing": "T1338 的真实旅程发现：新项目无 main 时 current_main={}，page.tsx:33 解引用即崩。只修这一处空值与必要的读/旅程；不得重写项目页或改科研语义。"
     }
   ]
 }

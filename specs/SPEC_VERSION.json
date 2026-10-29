@@ -1,6 +1,6 @@
 {
   "algorithm": "sha256",
-  "combined_digest": "5618a6d58c1bf01fe74eb7c341ce8bd50938ce76e936d5092ad62106a525b06c",
+  "combined_digest": "eaa827d835f680506f926de6c070b5ecd7ccba0bbe24fcc26d2581171787e4e4",
   "files": {
     "specs/README.md": "2a0398dfb3ead0586034364d7411d845b84fd33b7c43d1ce9199d6a14ef4cf1a",
     "specs/api/openapi-exemptions.yaml": "545ac92bc8476313240259b1ccd6d11c5c018fa33129473fc1d5c4d0d0b1be70",
@@ -10,7 +10,7 @@
     "specs/mcp/tools.json": "2657a1747f00b71aa91c97c2cd0cbdea3fdaa2a3d2ab0589867302002504b60a",
     "specs/orchestrator/decision-levels.yaml": "8a06ec18b8abd79c2462e3d3bcc5b785c51a8f970c54aaa279f174882e0f5a3f",
     "specs/orchestrator/derived-artifacts.json": "25c7cf0aa2f5dca78d2c3668a45db348c2aaaa9738be203832173f6a200694ba",
-    "specs/orchestrator/gates.json": "e69a168cfab5920e2ac6b3c6b5fb5293dec5855692d6f7bcdfdc5f06bd4402c4",
+    "specs/orchestrator/gates.json": "9727430f4b2d876988d5c5d866c8fe9777f47663aad63793a54b863ad7feae2d",
     "specs/orchestrator/rddev-cli.yaml": "f73576090a3f8bb3b78d560e662e0a180c480917b12f731ad579879ed174a397",
     "specs/orchestrator/review-verdict.schema.json": "78940ff58ba1d84e05d739d1c4af2a4d47b2fa834e7ba2ce2bca5b337f66f9fd",
     "specs/orchestrator/source-repo-preflight.schema.json": "a69dd6840fd2c5558dfba7fdb19019430f1c9a3b248c19c6f0a93b2912882932",
@@ -40,9 +40,9 @@
     "specs/schemas/sample.schema.json": "fed5737f271de54c07ebcb429740b224023ce0ffee84e173ff48b7fa7639732a",
     "specs/ui/page-inventory.csv": "c89311bf12526e5d5762a351d71a447caa1c9a79912a172449dd3639141387fb",
     "specs/ui/routes.yaml": "748737c2ea6377aef7142e04f176afd708a99b5ca0600241737370f437abdb5e",
-    "tasks/tasks.json": "6e0eb500bb2cbe14afa490618e8a8609b507ecbe97efcd1f57baa9b09e7509ad"
+    "tasks/tasks.json": "9961b8ce3939d652d859cf15bfd859b69f2e8ca1b9299a088dab8783e78667f4"
   },
   "input_count": 39,
   "marker_format": 1,
-  "spec_version": "sha256:5618a6d58c1bf01f"
+  "spec_version": "sha256:eaa827d835f68050"
 }

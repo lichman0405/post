@@ -112,7 +112,8 @@
     {
       "web": "WEB-05",
       "tasks": [
-        "T1306"
+        "T1306",
+        "T1339"
       ],
       "milestone": "M1",
       "journeys": [
