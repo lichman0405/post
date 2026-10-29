@@ -39,6 +39,11 @@
 #      no creation step (docs/70 §6.3). The fixture owner signs in through
 #      the product's /login form with credentials both sides derive from
 #      WEB_V2_RUN_ID — never a constant, never recorded.
+#   7. the WEB-05 overview journey (T1339): a freshly created Private
+#      project — no main branch, so an empty current_main — opens from the
+#      directory without a page error, and the seeded fixture project's
+#      overview still shows its accepted-main line. It registers one
+#      account and creates one project, so it runs last.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.
@@ -286,6 +291,18 @@ if ! node "$V2_DIR/journey-web05.mjs" "$BASE"; then
   fail "the WEB-05 browser journey failed (evidence: $EVIDENCE_DIR/web05)"
 fi
 
+# ---- 14. WEB-05 overview journey (a project without main, and with main) ---
+# T1339: a freshly created project has no main branch, so the overview JSON
+# carries an empty `current_main`. It opens from the directory without a page
+# error, and the accepted-main line still renders for the seeded project
+# whose main branch has commits. It registers one account and creates one
+# project, so it runs last, after every journey about an empty directory.
+echo "== web-v2: browser journey (WEB-05 overview: no main does not crash, main still shows) =="
+if ! node "$V2_DIR/journey-web05-overview.mjs" "$BASE"; then
+  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+  fail "the WEB-05 overview (T1339) browser journey failed (evidence: $EVIDENCE_DIR/web05-overview)"
+fi
+
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
 cat > "$EVIDENCE_DIR/runner.json" <<EOF
 {
@@ -297,7 +314,8 @@ cat > "$EVIDENCE_DIR/runner.json" <<EOF
   "result": "passed",
   "evidence_dir": "$EVIDENCE_DIR",
   "u02_evidence_dir": "$U02_EVIDENCE_DIR",
-  "web05_evidence_dir": "$EVIDENCE_DIR/web05"
+  "web05_evidence_dir": "$EVIDENCE_DIR/web05",
+  "web05_overview_evidence_dir": "$EVIDENCE_DIR/web05-overview"
 }
 EOF
 echo "web-v2: PASSED — evidence in $EVIDENCE_DIR"
