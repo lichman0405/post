@@ -57,6 +57,26 @@ the 401 on `GET /auth/session` from each new context before it has an account,
 and the 403 on the viewer's `PATCH`. The 403 is asserted by status AND by the
 visible sentence, so waiving its console line does not waive the refusal.
 
+### The WEB-05 overview slice (T1339): a project without main, and one with main
+
+`journey-web05-overview.mjs` is the regression evidence for the project
+overview's accepted-main line:
+
+| Step | What the browser does | What is asserted |
+|---|---|---|
+| `signup-new-account` | follows the home sign-in entry, switches `/login` to create-account mode, submits | `POST /api/v1/auth/signup`, the header names the new handle |
+| `create-a-private-project-that-has-no-main-branch` | enters `/projects` through the home project entry, opens the directory's own create control and fills the form with an explicit Private choice | `POST /api/v1/projects` → 201, the row and its private badge appear, the row links to a project page |
+| `open-the-new-project-from-the-directory-without-a-pageerror` | clicks that row | a 200 `GET …/overview`, the overview tab renders with the project's purpose and its empty-research heading, NO accepted-main line, and no new browser page error |
+| `sign-out-and-sign-in-to-the-fixture-owner` | signs out through the header's account menu, returns home and signs the seeded fixture owner in through `/login` | `POST /api/v1/auth/login` → 200, the owner's handle in the header |
+| `open-the-accepted-main-project-overview` | enters `/projects` through the home project entry and opens the fixture row | a 200 `GET …/overview`, the accepted-main line reads `Accepted main <8 hex> · <latest commit message> by web05-owner`, and no new page error |
+
+Project creation seeds no research state, so the created project has no main
+branch and the overview payload's `current_main` is `{}` — the state that
+used to throw inside the render (an empty object is truthy). The fixture
+project's main branch *does* have commits, so the second half proves the fix
+did not hide the accepted-main line for projects that have one. Evidence goes
+to `<run>/web05-overview/`.
+
 ## Run it
 
 ```bash

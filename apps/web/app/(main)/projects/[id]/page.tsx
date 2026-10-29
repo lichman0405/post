@@ -7,7 +7,12 @@ import { useProjectShell } from "./shell-context";
 import { useT } from "../../../i18n-provider";
 import "./demo.css";
 
-type Overview = { counts: Record<"questions"|"findings"|"hypotheses"|"claims"|"other_objects",number>; key_questions:Array<{object_id:string;statement:string;question_state:string;branch_id?:string}>; key_findings:Array<{object_id:string;statement:string;assessment:string;branch_id?:string}>; branches:{active:Array<{id:string;name:string;purpose:string}>}; current_main:{head_state_id:string;latest_commit:{message:string;actor:string}}|null };
+// current_main is ALWAYS an object on the wire, and `{}` when the project has
+// no main branch yet: an empty object is truthy, so "has a main" must be read
+// from head_state_id. latest_commit is omitted until main has a commit (a
+// branch created before its first commit has a head but no commit).
+type OverviewMain = { head_state_id?:string; latest_commit?:{message:string;actor:string} };
+type Overview = { counts: Record<"questions"|"findings"|"hypotheses"|"claims"|"other_objects",number>; key_questions:Array<{object_id:string;statement:string;question_state:string;branch_id?:string}>; key_findings:Array<{object_id:string;statement:string;assessment:string;branch_id?:string}>; branches:{active:Array<{id:string;name:string;purpose:string}>}; current_main?:OverviewMain|null };
 
 export default function ProjectOverviewPage(){
   const t=useT();
@@ -30,5 +35,5 @@ export default function ProjectOverviewPage(){
     statement is still what renders. */}
     {keyQuestions.length > 0 ? <h3>{keyQuestions[0]?.branch_id ? <Link href={`/projects/${project.id}/research/objects/${keyQuestions[0].object_id}`}>{keyQuestions[0]?.statement}</Link> : keyQuestions[0]?.statement}</h3> : <h3>{t("project.overview.noQuestion")}</h3>}<div className="demo-status-row"><span className="demo-badge">{t("project.overview.partiallyAnswered")}</span><span>{t("project.overview.competingHypotheses")}</span></div><h4>{t("project.overview.findings")}</h4>{keyFindings.map(f=><div className="demo-list-row" key={f.object_id}><span className={`demo-dot ${f.assessment}`}/><p>{f.branch_id ? <Link href={`/projects/${project.id}/research/objects/${f.object_id}`}>{f.statement}</Link> : f.statement}</p></div>)}</section><section className="demo-panel"><header><span className="demo-kicker">{t("project.overview.workInProgress")}</span><span>{t("project.overview.branchCount",{count:activeBranches.length})}</span></header><div className="demo-branch-list">{activeBranches.map(b=><div key={b.id}><strong>⑂ {b.name}</strong><p>{b.purpose}</p></div>)}</div></section></div>
     <section className="demo-panel"><header><span className="demo-kicker">{t("project.overview.workspaces")}</span><span>{t("project.overview.liveSurface")}</span></header><div className="demo-workspaces">{spaces.map(([nameKey,descKey,path,statusKey])=><Link key={nameKey} className="demo-workspace" href={`/projects/${project.id}/${path}`}><strong>{t(nameKey)}</strong><p>{t(descKey)}</p><span>{t(statusKey)} →</span></Link>)}</div></section>
-    {overview.current_main?<p className="demo-head-note">{t("project.overview.acceptedMain")} <code>{overview.current_main.head_state_id.slice(0,8)}</code> · {overview.current_main.latest_commit.message} {t("project.overview.by")} {overview.current_main.latest_commit.actor}</p>:null}</div>
+    {overview.current_main?.head_state_id?<p className="demo-head-note">{t("project.overview.acceptedMain")} <code>{overview.current_main.head_state_id.slice(0,8)}</code>{overview.current_main.latest_commit?<> · {overview.current_main.latest_commit.message} {t("project.overview.by")} {overview.current_main.latest_commit.actor}</>:null}</p>:null}</div>
 }
