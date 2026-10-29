@@ -9,7 +9,6 @@ import { formatCalendarDate } from "../../../../../lib/i18n";
 import { useProjectShell } from "../shell-context";
 import {
   humanizeCode,
-  objectHref,
   objectTypeKey,
   payloadEntries,
   researchHref,
@@ -18,6 +17,8 @@ import {
   type ObjectRelationPayload,
   type ResearchOutline,
 } from "./research-data";
+import { branchObjectHref, canAuthor, outcomeKey, outcomeOf, researchBranchHref } from "./authoring";
+import { CompletenessCheck, ObjectEditor, RelationEditor } from "./object-editing";
 import "./research.css";
 
 /**
@@ -54,11 +55,15 @@ export function ObjectDetailView({
   version,
   from,
   fromVersion,
+  branch,
 }: {
   objectId: string;
   version: VersionSelector;
   from: string;
   fromVersion: VersionSelector;
+  /** The research branch the reader is editing on (`?branch=`). "" means
+   *  "resolve it from the outline", which is the browse surface's rule. */
+  branch: string;
 }) {
   const shell = useProjectShell();
   const t = useT();
@@ -66,6 +71,9 @@ export function ObjectDetailView({
   const [outline, setOutline] = useState<ResearchOutline | null>(null);
   const [error, setError] = useState("");
   const [missing, setMissing] = useState(false);
+  // A write (a new version, a new relation) re-reads the object; the
+  // counter is what makes the same URL fetch again.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const outlineUrl = useMemo(
     () =>
@@ -92,7 +100,11 @@ export function ObjectDetailView({
         setOutline(outlineBody);
 
         const coordinate = researchObjects(outlineBody).get(objectId);
-        if (coordinate === undefined || coordinate.branchId === "") {
+        // An explicit ?branch= pins the read to the research path the reader
+        // is authoring on; otherwise the object's own coordinate decides, as
+        // the browse surface always has.
+        const readBranch = branch !== "" ? branch : coordinate?.branchId ?? "";
+        if (readBranch === "") {
           setMissing(true);
           return;
         }
@@ -100,7 +112,7 @@ export function ObjectDetailView({
         const query = new URLSearchParams({ include: "versions,relations" });
         if (version !== null) query.set("version", String(version));
         const detailResponse = await fetch(
-          `${base}/api/v1/projects/${project}/branches/${encodeURIComponent(coordinate.branchId)}/objects/${encodeURIComponent(objectId)}?${query.toString()}`,
+          `${base}/api/v1/projects/${project}/branches/${encodeURIComponent(readBranch)}/objects/${encodeURIComponent(objectId)}?${query.toString()}`,
           { credentials: "include", signal: controller.signal, headers: { accept: "application/json" } },
         );
         if (detailResponse.status === 404) {
@@ -116,7 +128,7 @@ export function ObjectDetailView({
     };
     void read();
     return () => controller.abort();
-  }, [outlineUrl, objectId, version, shell, t]);
+  }, [outlineUrl, objectId, version, branch, reloadKey, shell, t]);
 
   if (shell === null) return null;
   if (version === "invalid" || fromVersion === "invalid") {
@@ -162,6 +174,9 @@ export function ObjectDetailView({
       ? { id: from, title: index.get(from)?.title ?? from, version: fromVersion }
       : null;
   const typeKey = objectTypeKey(detail.object_type);
+  const outcome = outcomeOf(detail.payload);
+  const outcomeCatalogKey = outcome === "" ? null : outcomeKey(outcome);
+  const reload = (): void => setReloadKey((key) => key + 1);
 
   return (
     <div
@@ -173,12 +188,17 @@ export function ObjectDetailView({
       data-object-branch={detail.branch_id}
     >
       <nav className="research-breadcrumb" aria-label={t("research.object.breadcrumb")}>
-        <Link href={researchHref(projectId, "questions", detail.id)} data-back-to="research">
+        <Link
+          href={detail.branch_id === "" ? researchHref(projectId, "questions", detail.id) : researchBranchHref(projectId, "questions", detail.branch_id, detail.id)}
+          data-back-to="research"
+        >
           {t("research.object.backToResearch")}
         </Link>
         {backTarget === null ? null : (
           <Link
-            href={objectHref(projectId, backTarget.id, { version: backTarget.version ?? undefined })}
+            href={branchObjectHref(projectId, backTarget.id, detail.branch_id, {
+              version: backTarget.version ?? undefined,
+            })}
             data-back-to="object"
             data-back-object={backTarget.id}
             data-back-version={backTarget.version ?? undefined}
@@ -196,6 +216,14 @@ export function ObjectDetailView({
           <span className="research-object-id" data-object-state={detail.lifecycle_state}>
             {humanizeCode(detail.lifecycle_state)}
           </span>
+          {outcome === "" ? null : (
+            <span
+              className={`research-authoring-outcome ${outcome === "failed" ? "failed" : ""}`}
+              data-object-outcome={outcome}
+            >
+              {outcomeCatalogKey === null ? humanizeCode(outcome) : t(outcomeCatalogKey)}
+            </span>
+          )}
           <h2>{detail.title}</h2>
           <p className="research-object-location">
             {detail.project_name} · {detail.branch_name}
@@ -219,7 +247,7 @@ export function ObjectDetailView({
             <li key={entry.version_id} data-version-row={entry.version_no}>
               <Link
                 className="research-version-link"
-                href={objectHref(projectId, detail.id, {
+                href={branchObjectHref(projectId, detail.id, detail.branch_id, {
                   version: entry.version_no,
                   from: backTarget === null ? undefined : backTarget.id,
                   fromVersion: backTarget?.version ?? undefined,
@@ -284,6 +312,25 @@ export function ObjectDetailView({
           </ul>
         )}
       </section>
+
+      {/* Writing surfaces only where the reader may write. A viewer, an
+          anonymous reader and a signed-in non-member all keep the whole read
+          surface (payload, versions, relations) and are told why there is no
+          editor; the panels gate themselves as well, so a future call site
+          cannot leak one. The gate is a POSITIVE role check (canAuthor), so a
+          null role — which is what the shell gives every caller who is not a
+          project member — is read-only, not write-enabled. */}
+      {canAuthor(shell.role) ? (
+        <>
+          <ObjectEditor detail={detail} branchId={detail.branch_id} onSaved={reload} />
+          <RelationEditor detail={detail} branchId={detail.branch_id} onSaved={reload} />
+          <CompletenessCheck branchId={detail.branch_id} />
+        </>
+      ) : (
+        <p className="research-authoring-note" data-object-readonly>
+          {t("research.authoring.readOnly")}
+        </p>
+      )}
     </div>
   );
 }
@@ -317,7 +364,7 @@ function RelationRow({
       {known ? (
         <Link
           className="research-relation-link"
-          href={objectHref(projectId, relation.other_object_id, {
+          href={branchObjectHref(projectId, relation.other_object_id, detail.branch_id, {
             from: detail.id,
             fromVersion: detail.selected_version_no,
           })}

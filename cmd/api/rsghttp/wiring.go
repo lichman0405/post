@@ -14,6 +14,7 @@ import (
 // implementation is *rsg.Service.
 type Service interface {
 	CreateBranch(ctx context.Context, actor domain.User, projectID string, in rsg.CreateBranchInput) (domain.Branch, error)
+	ListBranches(ctx context.Context, r projects.Reader, projectID string) (rsg.BranchList, error)
 	CreateObject(ctx context.Context, actor domain.User, projectID, branchID string, in rsg.CreateObjectInput) (rsg.ObjectResult, error)
 	CreateObjectVersion(ctx context.Context, actor domain.User, projectID, branchID, objectID string, in rsg.CreateObjectVersionInput) (rsg.ObjectVersionResult, error)
 	CreateRelation(ctx context.Context, actor domain.User, projectID, branchID string, in rsg.CreateRelationInput) (rsg.RelationResult, error)
@@ -63,6 +64,10 @@ type API struct {
 // validation surface already uses for its ":validate" suffix.
 func (a *API) Register(v1 *http.ServeMux) {
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches", a.handlers.handleCreateBranch)
+	// The branch list the contract documents ("List branches"): the read the
+	// authoring surface's branch selector needs. It answers the project's
+	// branches only — a branch's object slice is GET /query?branch_id=.
+	v1.HandleFunc("GET /api/v1/projects/{projectId}/branches", a.handlers.handleListBranches)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/objects", a.handlers.handleCreateObject)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/objects/{object...}", a.handlers.handleCreateObjectVersion)
 	v1.HandleFunc("POST /api/v1/projects/{projectId}/branches/{branchId}/relations", a.handlers.handleCreateRelation)

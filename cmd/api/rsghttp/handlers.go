@@ -39,6 +39,14 @@ type handlers struct {
 }
 
 // branchPayload is the client-visible branch shape.
+//
+// Two fields are nullable ON PURPOSE: purpose and base_state_id are JSON
+// null when the branch has none, so a client can tell "not stated" from
+// "stated as empty" (both are pointers, and both are nil-able in the
+// domain). The rest are plain values and are ALWAYS present on the wire —
+// including in the list read, which does not fetch every column: git_ref
+// and created_by are then "" rather than absent, so one shape serves both
+// routes and a client never has to branch on which route it called.
 type branchPayload struct {
 	ID          string    `json:"id"`
 	ProjectID   string    `json:"project_id"`
@@ -48,6 +56,7 @@ type branchPayload struct {
 	GitRef      string    `json:"git_ref"`
 	BaseStateID *string   `json:"base_state_id"`
 	Lifecycle   string    `json:"lifecycle_state"`
+	IsMain      bool      `json:"is_main"`
 	CreatedBy   string    `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -57,7 +66,8 @@ func branchPayloadFromDomain(b domain.Branch) branchPayload {
 		ID: b.ID, ProjectID: b.ProjectID, Name: b.Name,
 		Visibility: string(b.Visibility), Purpose: b.Purpose,
 		GitRef: b.GitRef, BaseStateID: b.BaseStateID,
-		Lifecycle: string(b.Lifecycle), CreatedBy: b.CreatedBy, CreatedAt: b.CreatedAt,
+		Lifecycle: string(b.Lifecycle), IsMain: b.IsMain(),
+		CreatedBy: b.CreatedBy, CreatedAt: b.CreatedAt,
 	}
 }
 
@@ -166,6 +176,50 @@ func (h *handlers) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authhttp.WriteJSON(w, http.StatusCreated, branchPayloadFromDomain(branch))
+}
+
+type branchListPayload struct {
+	ProjectID string          `json:"project_id"`
+	Branches  []branchPayload `json:"branches"`
+}
+
+// handleListBranches: GET /api/v1/projects/{projectId}/branches — the
+// project's branch surface (specs/api/openapi.yaml, "List branches").
+// Read-authorized exactly like every other project read: an invisible
+// project answers 404 project not found, never 403.
+func (h *handlers) handleListBranches(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.ListBranches(r.Context(), reader(r), r.PathValue("projectId"))
+	if err != nil {
+		rsgError(w, r, err)
+		return
+	}
+	payload := branchListPayload{
+		ProjectID: res.ProjectID,
+		Branches:  make([]branchPayload, 0, len(res.Branches)),
+	}
+	for _, b := range res.Branches {
+		entry := branchPayload{
+			ID:         b.ID,
+			ProjectID:  res.ProjectID,
+			Name:       b.Name,
+			Visibility: b.Visibility,
+			Lifecycle:  b.Lifecycle,
+			IsMain:     b.IsMain,
+			CreatedAt:  b.CreatedAt,
+		}
+		if b.Purpose != "" {
+			purpose := b.Purpose
+			entry.Purpose = &purpose
+		}
+		if b.HeadStateID != "" {
+			head := b.HeadStateID
+			entry.BaseStateID = &head
+		}
+		// GitRef and CreatedBy are not part of the list read: a branch row
+		// answers where it sits on the research path, not who forked it.
+		payload.Branches = append(payload.Branches, entry)
+	}
+	authhttp.WriteJSON(w, http.StatusOK, payload)
 }
 
 type createObjectRequest struct {

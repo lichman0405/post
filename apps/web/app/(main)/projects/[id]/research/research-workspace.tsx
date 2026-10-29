@@ -20,6 +20,8 @@ import {
   type ResearchOutline,
   type ResearchView,
 } from "./research-data";
+import { researchBranchHref } from "./authoring";
+import { ResearchAuthoring } from "./authoring-panel";
 import "./research.css";
 
 /**
@@ -40,7 +42,7 @@ import "./research.css";
  * The page is exactly as visible as its project (the API's read gate), and
  * a refused read renders a neutral state, not a partial outline.
  */
-export function ResearchWorkspace({ view, focus }: { view: ResearchView; focus: string }) {
+export function ResearchWorkspace({ view, focus, branch }: { view: ResearchView; focus: string; branch: string }) {
   const shell = useProjectShell();
   const t = useT();
   const [outline, setOutline] = useState<ResearchOutline | null>(null);
@@ -111,7 +113,7 @@ export function ResearchWorkspace({ view, focus }: { view: ResearchView; focus: 
         {(["questions", "findings"] as ResearchView[]).map((key) => (
           <Link
             key={key}
-            href={researchHref(projectId, key)}
+            href={branch === "" ? researchHref(projectId, key) : researchBranchHref(projectId, key, branch)}
             className="research-view-link"
             data-research-view-link={key}
             aria-current={view === key ? "page" : undefined}
@@ -129,6 +131,8 @@ export function ResearchWorkspace({ view, focus }: { view: ResearchView; focus: 
           </div>
         ))}
       </section>
+
+      <ResearchAuthoring projectId={projectId} branchId={branch} view={view} />
 
       {empty ? (
         <div className="research-state" data-research-empty>

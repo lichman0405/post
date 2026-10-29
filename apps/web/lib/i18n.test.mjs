@@ -370,3 +370,146 @@ test("the research-browse copy is one block of catalog keys, in both locales", (
     }
   }
 });
+
+test("the research-authoring copy is one block of catalog keys, in both locales", () => {
+  // WEB-06a (U03 slice a) puts branches, the draft forms of the four slice-a
+  // families, the review check and the relation editor in front of a member.
+  // Their copy is one appended block in lib/i18n.ts; this pins the SET, so a
+  // key renamed on one side of the catalog cannot leave a blank label — or a
+  // bare ⟦key⟧ marker — on a page that renders it.
+  const keys = [
+    "research.authoring.eyebrow",
+    "research.authoring.title",
+    "research.authoring.note",
+    "research.authoring.readOnly",
+    "research.authoring.noBranch",
+    "research.authoring.option.none",
+    "research.authoring.target.choose",
+    "research.authoring.target.none",
+    "research.authoring.target.outside",
+    "research.authoring.requiredForReview",
+    "research.authoring.branch.label",
+    "research.authoring.branch.none",
+    "research.authoring.branch.mainOption",
+    "research.authoring.branch.new",
+    "research.authoring.branch.name",
+    "research.authoring.branch.namePlaceholder",
+    "research.authoring.branch.purpose",
+    "research.authoring.branch.creating",
+    "research.authoring.branch.create",
+    "research.authoring.branch.hint",
+    "research.authoring.branch.error",
+    "research.authoring.branch.nameTaken",
+    "research.authoring.branch.unavailable",
+    "research.authoring.inventory.label",
+    "research.authoring.inventory.title",
+    "research.authoring.inventory.empty",
+    "research.authoring.object.version",
+    "research.authoring.object.open",
+    "research.authoring.form.label",
+    "research.authoring.form.title",
+    "research.authoring.form.note",
+    "research.authoring.form.kindLabel",
+    "research.authoring.saving",
+    "research.authoring.saveDraft",
+    "research.authoring.draftHint",
+    "research.authoring.invalidJson",
+    "research.authoring.saveError",
+    "research.authoring.saved",
+    "research.authoring.openDraft",
+    "research.authoring.field.jsonHint",
+    "research.authoring.field.listHint",
+    "research.authoring.field.statement",
+    "research.authoring.field.purpose",
+    "research.authoring.field.questionState",
+    "research.authoring.field.scope",
+    "research.authoring.field.question",
+    "research.authoring.field.hypothesisType",
+    "research.authoring.field.assessment",
+    "research.authoring.field.objective",
+    "research.authoring.field.operators",
+    "research.authoring.field.samples",
+    "research.authoring.field.protocolVersion",
+    "research.authoring.field.conditions",
+    "research.authoring.field.resultSummary",
+    "research.authoring.field.resultOutcome",
+    "research.authoring.field.method",
+    "research.authoring.field.software",
+    "research.authoring.field.inputs",
+    "research.authoring.field.parameters",
+    "research.authoring.outcome.succeeded",
+    "research.authoring.outcome.failed",
+    "research.authoring.outcome.inconclusive",
+    "research.authoring.outcome.not-run",
+    "research.authoring.edit.eyebrow",
+    "research.authoring.edit.title",
+    "research.authoring.edit.note",
+    "research.authoring.edit.save",
+    "research.authoring.edit.saving",
+    "research.authoring.edit.saved",
+    "research.authoring.edit.conflict",
+    "research.authoring.edit.error",
+    "research.authoring.edit.stale",
+    "research.authoring.edit.openCurrent",
+    "research.authoring.check.eyebrow",
+    "research.authoring.check.title",
+    "research.authoring.check.note",
+    "research.authoring.check.run",
+    "research.authoring.check.running",
+    "research.authoring.check.error",
+    "research.authoring.check.blocked",
+    "research.authoring.check.passed",
+    "research.authoring.check.warnings",
+    "research.authoring.check.noGaps",
+    "research.authoring.check.notSubmitted",
+    "research.authoring.relation.eyebrow",
+    "research.authoring.relation.title",
+    "research.authoring.relation.note",
+    "research.authoring.relation.type",
+    "research.authoring.relation.target",
+    "research.authoring.relation.add",
+    "research.authoring.relation.adding",
+    "research.authoring.relation.added",
+    "research.authoring.relation.error",
+    "research.relation.tests-hypothesis",
+  ];
+  const catalogs = new Map(
+    Object.entries(MESSAGES).map(([locale, table]) => [locale, new Map(Object.entries(table))]),
+  );
+  for (const key of keys) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key);
+      assert.equal(typeof value, "string", `${locale} is missing ${key}`);
+      assert.notEqual(value.trim(), "", `${locale}:${key} is empty`);
+      // Same rule as the browse block: catalog keys carry hyphens only. A
+      // field name like `result_summary` must be camelCased in the key and
+      // stay untranslated in the stored payload.
+      assert.equal(key.includes("_"), false, `${key} uses an underscore`);
+    }
+  }
+  // Sentences that name a branch, a field, a version or a count interpolate
+  // that value; a placeholder lost in either language names nothing.
+  const placeholders = [
+    ["research.authoring.branch.mainOption", ["{name}"]],
+    ["research.authoring.inventory.title", ["{name}"]],
+    ["research.authoring.object.version", ["{version}"]],
+    ["research.authoring.draftHint", ["{field}"]],
+    ["research.authoring.invalidJson", ["{fields}"]],
+    ["research.authoring.saved", ["{version}"]],
+    ["research.authoring.edit.note", ["{version}"]],
+    ["research.authoring.edit.saved", ["{version}"]],
+    ["research.authoring.edit.stale", ["{version}", "{current}"]],
+    ["research.authoring.edit.openCurrent", ["{current}"]],
+    ["research.authoring.check.blocked", ["{count}"]],
+    ["research.authoring.check.warnings", ["{count}"]],
+    ["research.authoring.relation.added", ["{title}"]],
+  ];
+  for (const [key, names] of placeholders) {
+    for (const locale of LOCALES) {
+      const value = catalogs.get(locale)?.get(key) ?? "";
+      for (const name of names) {
+        assert.ok(value.includes(name), `${locale}:${key} lost ${name}`);
+      }
+    }
+  }
+});

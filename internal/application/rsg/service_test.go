@@ -55,12 +55,13 @@ func (f *fakeProjects) Get(ctx context.Context, r projects.Reader, projectID str
 }
 
 type fakeBranches struct {
-	branch  domain.Branch
-	getErr  error
-	err     error // Create error override
-	created bool
-	list    []domain.Branch
-	listErr error
+	branch    domain.Branch
+	getErr    error
+	err       error // Create error override
+	created   bool
+	list      []domain.Branch
+	listErr   error
+	listCalls int
 	// visibility is what Get reports (empty = public); the write paths map
 	// it onto the event visibility.
 	visibility domain.BranchVisibility
@@ -90,6 +91,7 @@ func (f *fakeBranches) Get(ctx context.Context, projectID, branchID string) (dom
 }
 
 func (f *fakeBranches) List(ctx context.Context, projectID string) ([]domain.Branch, error) {
+	f.listCalls++
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

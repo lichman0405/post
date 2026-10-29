@@ -30,6 +30,7 @@ export default async function ResearchObjectPage({
       version={versionParamOf(query.version)}
       from={firstParam(query.from)}
       fromVersion={versionParamOf(query.fromVersion)}
+      branch={firstParam(query.branch)}
     />
   );
 }

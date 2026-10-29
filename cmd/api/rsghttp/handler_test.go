@@ -40,19 +40,21 @@ const rsgTestProjectID = "11111111-2222-4333-8444-555555555555"
 // stubService is a canned Service: every command records its inputs and
 // answers the configured result or error.
 type stubService struct {
-	branch   domain.Branch
-	object   rsg.ObjectResult
-	version  rsg.ObjectVersionResult
-	relation rsg.RelationResult
-	query    rsg.QueryResult
-	detail   rsg.ObjectDetail
-	outline  rsg.ResearchOutline
-	overview rsg.ProjectOverview
-	err      error
+	branch     domain.Branch
+	branchList rsg.BranchList
+	object     rsg.ObjectResult
+	version    rsg.ObjectVersionResult
+	relation   rsg.RelationResult
+	query      rsg.QueryResult
+	detail     rsg.ObjectDetail
+	outline    rsg.ResearchOutline
+	overview   rsg.ProjectOverview
+	err        error
 
 	evidenceAssertion rsg.EvidenceAssertionResult
 
 	createBranchCalls            int
+	listBranchesCalls            int
 	createObjectCalls            int
 	createObjectVersionCalls     int
 	createRelationCalls          int
@@ -74,6 +76,12 @@ func (s *stubService) CreateBranch(_ context.Context, _ domain.User, projectID s
 	s.createBranchCalls++
 	s.lastProjectID, s.lastInput = projectID, in
 	return s.branch, s.err
+}
+
+func (s *stubService) ListBranches(_ context.Context, _ projects.Reader, projectID string) (rsg.BranchList, error) {
+	s.listBranchesCalls++
+	s.lastProjectID = projectID
+	return s.branchList, s.err
 }
 
 func (s *stubService) CreateObject(_ context.Context, _ domain.User, projectID, branchID string, in rsg.CreateObjectInput) (rsg.ObjectResult, error) {
@@ -305,6 +313,74 @@ func TestCreateBranchHappyPath(t *testing.T) {
 	in, ok := stub.lastInput.(rsg.CreateBranchInput)
 	if !ok || in.Name != "main" || in.BaseRef != "" || in.Visibility != domain.BranchVisibilityPrivate {
 		t.Errorf("input = %#v", stub.lastInput)
+	}
+}
+
+func TestListBranchesHappyPath(t *testing.T) {
+	head := "state-1"
+	purpose := "CO2 isotherm path"
+	stub := &stubService{branchList: rsg.BranchList{
+		ProjectID: rsgTestProjectID,
+		Branches: []rsg.BranchSummary{
+			{
+				ID: "branch-main", Name: "main", Visibility: "private", Lifecycle: "active",
+				IsMain: true, HeadStateID: head,
+				CreatedAt: time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC),
+			},
+			{
+				ID: "branch-2", Name: "co2-path", Purpose: purpose, Visibility: "private",
+				Lifecycle: "active", IsMain: false, HeadStateID: head,
+				CreatedAt: time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+			},
+		},
+	}}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/branches")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if payload["project_id"] != rsgTestProjectID {
+		t.Fatalf("project_id = %v", payload["project_id"])
+	}
+	branches, ok := payload["branches"].([]any)
+	if !ok || len(branches) != 2 {
+		t.Fatalf("branches = %#v", payload["branches"])
+	}
+	first, _ := branches[0].(map[string]any)
+	if first["name"] != "main" || first["is_main"] != true {
+		t.Fatalf("first branch = %#v, want main/is_main", first)
+	}
+	if first["base_state_id"] != "state-1" || first["lifecycle_state"] != "active" {
+		t.Fatalf("first branch coordinates = %#v", first)
+	}
+	second, _ := branches[1].(map[string]any)
+	if second["name"] != "co2-path" || second["is_main"] != false || second["purpose"] != "CO2 isotherm path" {
+		t.Fatalf("second branch = %#v", second)
+	}
+	if stub.listBranchesCalls != 1 || stub.lastProjectID != rsgTestProjectID {
+		t.Fatalf("service calls = %d project = %s", stub.listBranchesCalls, stub.lastProjectID)
+	}
+}
+
+func TestListBranchesProjectNotFoundEnvelope(t *testing.T) {
+	stub := &stubService{err: projects.ErrProjectNotFound}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+
+	resp, err := authed.Get(ts.URL + "/api/v1/projects/" + rsgTestProjectID + "/branches")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	payload := decodePayload(t, resp)
+	if payload["code"] != projects.CodeProjectNotFound {
+		t.Fatalf("code = %v, want %s", payload["code"], projects.CodeProjectNotFound)
 	}
 }
 

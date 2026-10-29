@@ -354,6 +354,35 @@ func TestOverviewJSONContract(t *testing.T) {
 	}
 }
 
+// TestOverviewJSONCurrentMainNullWithoutBranch: a project created moments
+// ago has no integration branch yet. `current_main` must then be JSON null,
+// not a zero-valued object: the web client types it `{…} | null` and reads
+// head_state_id/latest_commit only when it is present, so an object whose
+// fields were omitted crashed the Overview render for an empty project.
+func TestOverviewJSONCurrentMainNullWithoutBranch(t *testing.T) {
+	ov := cannedOverview()
+	ov.CurrentMain = rsg.OverviewMain{}
+	stub := &stubService{overview: ov}
+	ts, authed, _, _ := newRSGTestServer(t, stub)
+	resp, err := authed.Get(ts.URL + overviewBase)
+	if err != nil {
+		t.Fatalf("GET overview JSON: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", resp.StatusCode, respBody(resp))
+	}
+	var p struct {
+		CurrentMain json.RawMessage `json:"current_main"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		t.Fatalf("decode overview JSON: %v", err)
+	}
+	if string(p.CurrentMain) != "null" {
+		t.Errorf("current_main = %s, want null for a project with no main branch", p.CurrentMain)
+	}
+}
+
 // TestOverviewJSONDenied: the denied JSON contract answers the standard
 // error envelope — the route's JSON path runs the same gate.
 func TestOverviewJSONDenied(t *testing.T) {

@@ -19,5 +19,11 @@ export default async function ResearchPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  return <ResearchWorkspace view={researchViewOf(params.view)} focus={firstParam(params.focus)} />;
+  return (
+    <ResearchWorkspace
+      view={researchViewOf(params.view)}
+      focus={firstParam(params.focus)}
+      branch={firstParam(params.branch)}
+    />
+  );
 }

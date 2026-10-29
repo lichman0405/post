@@ -110,3 +110,75 @@ a.research-row-body:hover { background: var(--bgColor-muted, #f6f8fa); }
   .research-count { border-bottom: 1px solid #d8dee4; }
   .research-version-link, .research-fields > div { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* --- Authoring: branches, drafts, the review check ------------------------
+ * One surface, stacked top to bottom in the order a member needs it:
+ * branch bar → inventory + draft form → the object page's editors. Colors
+ * stay Primer's: neutral borders, blue interaction, green success, red
+ * danger, yellow attention. Nothing here is decorative.
+ */
+.research-authoring { display: grid; gap: 14px; }
+
+.research-branch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 8px; background: var(--bgColor-muted, #f6f8fa); }
+.research-branch-bar label { color: var(--fgColor-muted, #59636e); font-size: 12px; font-weight: 600; }
+.research-branch-bar select { min-width: 200px; max-width: 340px; padding: 5px 8px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 6px; background: #fff; color: var(--fgColor-default, #1f2328); font-size: 13px; }
+
+.research-authoring-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.research-authoring-grid > section { display: grid; gap: 10px; align-content: start; }
+.research-authoring-grid h4 { margin: 0; font-size: 13px; line-height: 1.4; }
+
+.research-authoring-objects { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.research-authoring-objects li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--borderColor-muted, #d8dee4); border-radius: 8px; font-size: 13px; }
+.research-authoring-objects li strong { font-size: 13px; overflow-wrap: anywhere; }
+.research-authoring-version { color: var(--fgColor-muted, #59636e); font-size: 11px; }
+.research-authoring-open { margin-left: auto; color: var(--fgColor-accent, #0969da); font-size: 12px; text-decoration: none; }
+.research-authoring-open:hover { text-decoration: underline; }
+
+/* A result outcome is data, not a status the UI invents: `failed` is shown
+ * in danger red because it is a real, recordable result — never hidden. */
+.research-authoring-outcome { display: inline-flex; padding: 1px 7px; border-radius: 999px; background: var(--bgColor-muted, #f6f8fa); color: var(--fgColor-muted, #59636e); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.research-authoring-outcome.failed { background: #ffebe9; color: #cf222e; }
+
+.research-authoring-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.research-authoring-kind { padding: 4px 10px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 6px; background: #fff; color: var(--fgColor-default, #1f2328); font-size: 12px; line-height: 1.4; cursor: pointer; }
+.research-authoring-kind[aria-pressed="true"] { border-color: var(--fgColor-accent, #0969da); background: #ddf4ff; color: #0969da; font-weight: 600; }
+
+.research-authoring-form { display: grid; gap: 10px; margin: 0; }
+.research-authoring-form > label { display: grid; gap: 4px; }
+.research-authoring-form > label > span { display: flex; gap: 2px; color: var(--fgColor-muted, #59636e); font-size: 12px; font-weight: 600; }
+.research-authoring-form input[type="text"], .research-authoring-form textarea, .research-authoring-form select { width: 100%; padding: 6px 8px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 6px; background: #fff; color: var(--fgColor-default, #1f2328); font: inherit; font-size: 13px; }
+.research-authoring-form textarea { resize: vertical; line-height: 1.5; }
+.research-authoring-form input:focus, .research-authoring-form textarea:focus, .research-authoring-form select:focus { outline: 2px solid var(--fgColor-accent, #0969da); outline-offset: -1px; border-color: var(--fgColor-accent, #0969da); }
+.research-authoring-form label.invalid input, .research-authoring-form label.invalid textarea, .research-authoring-form label.invalid select { border-color: #cf222e; }
+.research-authoring-required { color: #cf222e; font-weight: 700; }
+
+.research-authoring-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.research-authoring-button { padding: 5px 12px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 6px; background: var(--bgColor-muted, #f6f8fa); color: var(--fgColor-default, #1f2328); font-size: 12px; font-weight: 600; line-height: 1.4; cursor: pointer; }
+.research-authoring-button:hover:not(:disabled) { border-color: var(--fgColor-accent, #0969da); }
+.research-authoring-button.primary { border-color: #1f883d; background: #1f883d; color: #fff; }
+.research-authoring-button.primary:hover:not(:disabled) { background: #1a7f37; border-color: #1a7f37; }
+.research-authoring-button:disabled { opacity: .55; cursor: not-allowed; }
+
+.research-authoring-note { margin: 0; color: var(--fgColor-muted, #59636e); font-size: 12px; line-height: 1.5; }
+.research-authoring-error { margin: 0; color: #cf222e; font-size: 12px; line-height: 1.5; }
+.research-authoring-saved { margin: 0; color: #1a7f37; font-size: 12px; line-height: 1.5; }
+.research-authoring-saved a { color: var(--fgColor-accent, #0969da); }
+
+/* --- The review check: the server's pr-gate report, verbatim ------------ */
+.research-gate-report { display: grid; gap: 8px; }
+.research-gate-verdict { margin: 0; padding: 7px 10px; border-radius: 6px; border: 1px solid #d4a72c; background: #fff8c5; color: #7d4e00; font-size: 13px; font-weight: 600; }
+.research-gate-verdict.blocked { border-color: #ffcecb; background: #ffebe9; color: #cf222e; }
+.research-gate-verdict.passed { border-color: #aceebb; background: #dafbe1; color: #1a7f37; }
+.research-gate-rows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.research-gate-rows li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding: 7px 10px; border: 1px solid var(--borderColor-muted, #d8dee4); border-radius: 8px; font-size: 12px; }
+.research-gate-rows li strong { font-size: 12px; }
+.research-gate-rows li small { flex-basis: 100%; color: var(--fgColor-muted, #59636e); font-size: 11px; line-height: 1.45; }
+.research-gate-severity { padding: 0 6px; border-radius: 999px; background: var(--bgColor-muted, #f6f8fa); color: var(--fgColor-muted, #59636e); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.research-gate-severity.blocking { background: #ffebe9; color: #cf222e; }
+.research-gate-severity.warning { background: #fff8c5; color: #7d4e00; }
+.research-gate-subject, .research-gate-detail { color: var(--fgColor-default, #1f2328); overflow-wrap: anywhere; }
+.research-gate-notice { margin: 0; padding-top: 6px; border-top: 1px dashed var(--borderColor-muted, #d8dee4); color: var(--fgColor-muted, #59636e); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .research-authoring-grid { grid-template-columns: 1fr; }
+}

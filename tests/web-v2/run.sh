@@ -39,11 +39,26 @@
 #      no creation step (docs/70 §6.3). The fixture owner signs in through
 #      the product's /login form with credentials both sides derive from
 #      WEB_V2_RUN_ID — never a constant, never recorded.
+#   7. the WEB-06a journey (T1307): a fresh account creates its project and
+#      two research branches through the DOM before any write, saves a
+#      minimal question draft, signs out and back in and continues the draft
+#      from the branch URL it saved, authors a hypothesis, an experiment
+#      (with a RECORDED FAILURE) and a calculation through their own forms,
+#      runs the server's own pr check (which names the incomplete
+#      hypothesis's gap and says nothing was submitted), adds a relation and
+#      a second version, then switches branch: the other branch holds only
+#      its own complete object and its check passes, and switching back
+#      shows branch A's objects, versions and relation intact. Unlike the
+#      WEB-05 journey it seeds nothing: every object in it is typed.
 #
 # No business step uses page.request/APIRequestContext, SQL, CLI or a seeded
 # account. Accounts are established by the browser through /login.
 #
-# Usage: bash tests/web-v2/run.sh [--preflight-only]
+# Usage: bash tests/web-v2/run.sh [--preflight-only] [--only=<journey>,...]
+#        --only is a DEVELOPMENT filter for iterating on one journey: it
+#        still runs the dependency checks, the anti-bypass scan and the
+#        pre-flight, and it records the filter in runner.json. A filtered run
+#        is not a full acceptance run and does not claim to be one.
 # Env:   WEB_V2_WEB_PORT           web port (default 31119)
 #        WEB_V2_EVIDENCE_DIR       evidence output (default tests/web-v2/evidence/<run id>)
 #        WEB_V2_RUN_ID             run id (default timestamp + random)
@@ -154,9 +169,22 @@ if [ "$MODE" = "--preflight-only" ]; then
   echo "web-v2: PREFLIGHT OK — real services reachable, web and harness dependencies present"
   exit 0
 fi
-if [ -n "$MODE" ]; then
-  fail "unknown mode '$MODE' (only --preflight-only is accepted)"
-fi
+ONLY=""
+case "$MODE" in
+  "") ;;
+  --only=*) ONLY="${MODE#--only=}" ;;
+  *) fail "unknown mode '$MODE' (accepted: --preflight-only, --only=<journey>,...)" ;;
+esac
+
+# Whether a journey section should run in this invocation. A --only list is a
+# development filter; with no list every section runs.
+wanted() {
+  [ -z "$ONLY" ] && return 0
+  case ",$ONLY," in
+    *",$1,"*) return 0 ;;
+    *) echo "-- skipping $1 (--only=$ONLY)"; return 1 ;;
+  esac
+}
 
 # ---- 4. Port must be ours ---------------------------------------------------
 if ss -tln 2>/dev/null | grep -qE ":$WEB_PORT[[:space:]]"; then
@@ -245,23 +273,35 @@ node "$ROOT/scripts/tests/web-v2-bypass-scan.mjs" "$V2_DIR" || fail "the anti-by
 echo "== web-v2: entry-point check (sign-in form + account establishment) =="
 node "$V2_DIR/entrypoint-check.mjs" "$BASE/login" || fail "the login page is missing a required entry point (missing entry is a failure, never a skip)"
 
+# ---- 9b. Authoring model unit tests (WEB-06a) ------------------------------
+# The browser journey can only type the values it happens to type; these pin
+# the value→payload conversion itself (an empty draft field must stay absent,
+# an outcome must land in `metadata`, a gate warning must not count as a
+# block) before the slower journeys run. They import the app's own module.
+echo "== web-v2: authoring model unit tests (WEB-06a) =="
+node --test "$V2_DIR/authoring.test.mjs" || fail "the research authoring model unit tests failed"
+
 # ---- 10. Browser journey ----------------------------------------------------
-echo "== web-v2: browser journey (signup/session/signout/login) =="
-if ! node "$V2_DIR/journey.mjs" "$BASE"; then
-  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
-  fail "the browser journey failed (evidence: $EVIDENCE_DIR)"
+if wanted base; then
+  echo "== web-v2: browser journey (signup/session/signout/login) =="
+  if ! node "$V2_DIR/journey.mjs" "$BASE"; then
+    cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+    fail "the browser journey failed (evidence: $EVIDENCE_DIR)"
+  fi
 fi
 
 # ---- 11. WEB-03 browser journey (organizations, members, roles) ------------
 # Its own evidence subdirectory: two journeys write two step records, two
 # traces and two screenshot series, and merging them into one run-id would
 # make neither reviewable.
-echo "== web-v2: browser journey U02 (organizations/members/roles) =="
 U02_EVIDENCE_DIR="$EVIDENCE_DIR/u02"
-mkdir -p "$U02_EVIDENCE_DIR"
-if ! WEB_V2_EVIDENCE_DIR="$U02_EVIDENCE_DIR" node "$V2_DIR/journey-u02.mjs" "$BASE"; then
-  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
-  fail "the WEB-03 (U02) browser journey failed (evidence: $U02_EVIDENCE_DIR)"
+if wanted u02; then
+  echo "== web-v2: browser journey U02 (organizations/members/roles) =="
+  mkdir -p "$U02_EVIDENCE_DIR"
+  if ! WEB_V2_EVIDENCE_DIR="$U02_EVIDENCE_DIR" node "$V2_DIR/journey-u02.mjs" "$BASE"; then
+    cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+    fail "the WEB-03 (U02) browser journey failed (evidence: $U02_EVIDENCE_DIR)"
+  fi
 fi
 
 # ---- 12. WEB-04 browser journey (create a project, and who may see it) ------
@@ -269,24 +309,51 @@ fi
 # purpose: it creates projects. The journey writes its own evidence under
 # $EVIDENCE_DIR/web04 (it appends "web04"), so it cannot overwrite another
 # journey's metadata/steps/trace.
-echo "== web-v2: browser journey (WEB-04 create: Public default, Private choice, duplicate address, anonymous hiding) =="
-if ! node "$V2_DIR/journey-web04.mjs" "$BASE"; then
-  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
-  fail "the WEB-04 browser journey failed (evidence: $EVIDENCE_DIR/web04)"
+if wanted web04; then
+  echo "== web-v2: browser journey (WEB-04 create: Public default, Private choice, duplicate address, anonymous hiding) =="
+  if ! node "$V2_DIR/journey-web04.mjs" "$BASE"; then
+    cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+    fail "the WEB-04 browser journey failed (evidence: $EVIDENCE_DIR/web04)"
+  fi
 fi
 
 # ---- 13. WEB-05 browser journey (research objects, versions, return path) ---
 # Reads the PRIVATE browse fixture the harness seeded (harness/fixture.go) as
 # its owner, signed in through /login. It creates no state, so its position
-# relative to the journeys above is free; it is last because it is the newest
-# slice. Its own evidence goes under $EVIDENCE_DIR/web05.
-echo "== web-v2: browser journey (WEB-05 browse: map/list agreement, old versions, return path) =="
-if ! node "$V2_DIR/journey-web05.mjs" "$BASE"; then
-  cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
-  fail "the WEB-05 browser journey failed (evidence: $EVIDENCE_DIR/web05)"
+# relative to the journeys above is free. Its own evidence goes under
+# $EVIDENCE_DIR/web05.
+if wanted web05; then
+  echo "== web-v2: browser journey (WEB-05 browse: map/list agreement, old versions, return path) =="
+  if ! node "$V2_DIR/journey-web05.mjs" "$BASE"; then
+    cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+    fail "the WEB-05 browser journey failed (evidence: $EVIDENCE_DIR/web05)"
+  fi
+fi
+
+# ---- 14. WEB-06a browser journey (branches, drafts, the four forms) --------
+# Creates its own account and project and every object it asserts; it seeds
+# nothing, so it may run anywhere. Its own evidence goes under
+# $EVIDENCE_DIR/web06.
+WEB06_EVIDENCE_DIR="$EVIDENCE_DIR/web06"
+if wanted web06; then
+  echo "== web-v2: browser journey (WEB-06a author: branches, draft continuation, four forms, review check, relation) =="
+  mkdir -p "$WEB06_EVIDENCE_DIR"
+  if ! WEB_V2_EVIDENCE_DIR="$WEB06_EVIDENCE_DIR" node "$V2_DIR/journey-web06.mjs" "$BASE"; then
+    cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+    fail "the WEB-06a authoring journey failed (evidence: $WEB06_EVIDENCE_DIR)"
+  fi
 fi
 
 cp "$WORK_DIR/web.log" "$EVIDENCE_DIR/web.log" 2>/dev/null || true
+
+# A filtered run is NOT an acceptance run: --only skips journeys, so "every
+# selected journey passed" is all it can say. runner.json and the banner say
+# "partial" so a filtered run can never be quoted as the full web-v2 gate.
+if [ -n "$ONLY" ]; then
+  RESULT="partial"
+else
+  RESULT="passed"
+fi
 cat > "$EVIDENCE_DIR/runner.json" <<EOF
 {
   "runner": "tests/web-v2/run.sh",
@@ -294,10 +361,16 @@ cat > "$EVIDENCE_DIR/runner.json" <<EOF
   "commit": "$COMMIT",
   "web_origin": "$BASE",
   "api_origin": "$API_URL",
-  "result": "passed",
+  "result": "$RESULT",
   "evidence_dir": "$EVIDENCE_DIR",
   "u02_evidence_dir": "$U02_EVIDENCE_DIR",
-  "web05_evidence_dir": "$EVIDENCE_DIR/web05"
+  "web05_evidence_dir": "$EVIDENCE_DIR/web05",
+  "web06_evidence_dir": "$WEB06_EVIDENCE_DIR",
+  "only": "$ONLY"
 }
 EOF
+if [ "$RESULT" = "partial" ]; then
+  echo "web-v2: PARTIAL — only the $ONLY journey(s) ran; this is a development filter, not an acceptance run (evidence: $EVIDENCE_DIR)"
+  exit 0
+fi
 echo "web-v2: PASSED — evidence in $EVIDENCE_DIR"

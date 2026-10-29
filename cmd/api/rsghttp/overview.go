@@ -53,8 +53,12 @@ type overviewPayload struct {
 	Branches       overviewBranchesPayload    `json:"branches"`
 	NeedsAttention []overviewAttentionPayload `json:"needs_attention"`
 	AttentionTotal int                        `json:"attention_total"`
-	CurrentMain    overviewMainPayload        `json:"current_main"`
-	Empty          bool                       `json:"empty"`
+	// CurrentMain is null when the project has no integration branch yet
+	// (a project created moments ago): the web client's contract types it
+	// `{…} | null` and reads its coordinates only when it is present. A
+	// zero-valued object would claim a main whose fields are absent.
+	CurrentMain *overviewMainPayload `json:"current_main"`
+	Empty       bool                 `json:"empty"`
 }
 
 type overviewBranchesPayload struct {
@@ -160,7 +164,7 @@ func overviewPayloadFrom(ov rsg.ProjectOverview) overviewPayload {
 		})
 	}
 	if ov.CurrentMain.BranchID != "" {
-		p.CurrentMain = overviewMainPayload{
+		p.CurrentMain = &overviewMainPayload{
 			BranchID:      ov.CurrentMain.BranchID,
 			BranchName:    ov.CurrentMain.BranchName,
 			HeadStateID:   ov.CurrentMain.HeadStateID,

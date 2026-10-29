@@ -68,6 +68,7 @@ import (
 	"github.com/lichman0405/post/cmd/api/profilehttp"
 	"github.com/lichman0405/post/cmd/api/projectshttp"
 	"github.com/lichman0405/post/cmd/api/rsghttp"
+	"github.com/lichman0405/post/cmd/api/validationhttp"
 	"github.com/lichman0405/post/internal/application/authn"
 	"github.com/lichman0405/post/internal/application/branches"
 	"github.com/lichman0405/post/internal/application/rsg"
@@ -368,6 +369,21 @@ func run(ctx context.Context, cfg config) error {
 	})
 	rsgAPI := rsghttp.New(rsghttp.Deps{Service: rsgSvc})
 	rsgAPI.Register(mux)
+
+	// The progressive validation gate (T1307 / WEB-06a): the authoring
+	// surface checks a branch against the pr gate before a reader claims it
+	// is ready for review, and renders the report's own missing-field rows.
+	// Composed exactly as cmd/api composes it — the snapshot repository over
+	// the state store, the canonical schema registry, and the same project
+	// read gate as every other read.
+	validationAPI := validationhttp.New(validationhttp.Deps{
+		Validator: appvalidation.NewService(
+			persistence.NewValidationSnapshotRepository(persistence.NewStateStore(pool)),
+			rsgvalidation.NewValidator(reg),
+		),
+		Projects: projectAPI.Service(),
+	})
+	validationAPI.Register(mux)
 
 	fixture, err := seedWeb05(ctx, pool, projectAPI.Service(), rsgSvc, cfg.web05Email, cfg.web05Password)
 	if err != nil {
