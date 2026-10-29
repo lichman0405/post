@@ -13272,10 +13272,10 @@
       ]
     },
     "T1307": {
-      "status": "verification",
-      "started_at": "2026-10-28T09:46:16Z",
-      "worker_run_id": "run-7fe39f237af5e70f",
-      "rejection_reason": "Review: request_changes.\n\n1) BLOCKING — gofmt: cmd/api/rsghttp/overview.go is listed by `gofmt -l`\n(the CurrentMain pointer change did not realign the Empty field). Run\n`gofmt -w cmd/api/rsghttp/overview.go` and `make fmt-check`.\n\n2) MAJOR — silent version revert: ObjectEditorForm seeds from the selected\nversion's payload but submits expectedVersion=current_version and the whole form\nas a shallow patch, so editing ?version=1 on an object now at v2 reverts every\nfield v1 had that v2 changed. Fix by one of: only offer the editor when the\nselected version IS the current version; seed from the latest; or submit only\nthe changed fields. Add a browser/unit case that edits an Experiment or\nCalculation second version and proves nothing else reverts.\n\n3) MINOR — journey coverage: required test 3 claims versions+relations for all\nfour types, but only question/hypothesis have v2 and the relation; add a second\nversion and a relation for an experiment/calculation, or narrow the claim.\n\n4) MINOR — `run.sh --only=<journey>` prints \"web-v2: PASSED\" and writes\nresult:\"passed\" for a partial run. A filtered run must not be quoted as a full\nacceptance run: brand it in the PASSED line and set result to \"partial\", or\nfail unless the caller explicitly asks for a filtered result.\n\n5) MINOR — object page shows *** to\nviewers; hide/disable them for role=viewer (server still enforces).\n\n6) MINOR — metadata.result_outcome is an undocumented convention and shallow\nmerge drops unknown metadata keys. Preserve unknown metadata keys on update and\nrecord the convention in RESULT/notes; the Supervisor will ratify or move it to\na spec. Do not invent more undocumented keys.\n\n7) NIT — branchPayload comment vs always-present empty fields; journey comment\nabout software/parameters; RESULT wording about relations.\n\nRe-run gofmt/fmt-check, build, web typecheck/lint/unit, `make web-v2` and\nsast-node; record exact outputs.\n",
+      "status": "blocked",
+      "started_at": "2026-10-29T01:49:53Z",
+      "worker_run_id": "run-4630129054b7b3f7",
+      "rejection_reason": "Two majors must be fixed before merge:\n\n1) Write affordances fail OPEN for non-members. `canWrite = shell.role !== \"viewer\"`\nis true when role is null (public project, anonymous/non-member), and the\nobject/relation editors use `role === \"viewer\"` only. Gate on a POSITIVE role\nset (owner/maintainer/contributor) or at minimum `role !== null && role !==\n\"viewer\"`; anonymous/non-members must see read-only surfaces. Server authz stays\nthe enforcement, but the UI must not advertise a capability the caller lacks.\n\n2) Clearing a nullable field cannot succeed: valueToPayload omits empty values\nand the server shallow-merges, so a cleared result_summary/software/protocol\nversion survives while the UI says \"Saved as version N\". Send an explicit null\nfor cleared nullable fields (schemas allow null for result_summary etc.) and add\nunit/journey evidence that clearing then reloading shows the field empty.\nPreserve unknown metadata keys as previously requested.\n\nRe-run gofmt/fmt-check, build, web typecheck/lint/unit, make web-v2, sast-node;\nrecord exact outputs. Stay in scope.\n",
       "history": [
         {
           "from": "todo",
@@ -13337,8 +13337,30 @@
           "at": "2026-10-29T01:38:27Z",
           "run_id": "run-cc0a84cefab81929",
           "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "rejected",
+          "at": "2026-10-29T01:49:52Z",
+          "run_id": "run-8497954983dd3c4b",
+          "reason": "Two majors must be fixed before merge:\n\n1) Write affordances fail OPEN for non-members. `canWrite = shell.role !== \"viewer\"`\nis true when role is null (public project, anonymous/non-member), and the\nobject/relation editors use `role === \"viewer\"` only. Gate on a POSITIVE role\nset (owner/maintainer/contributor) or at minimum `role !== null && role !==\n\"viewer\"`; anonymous/non-members must see read-only surfaces. Server authz stays\nthe enforcement, but the UI must not advertise a capability the caller lacks.\n\n2) Clearing a nullable field cannot succeed: valueToPayload omits empty values\nand the server shallow-merges, so a cleared result_summary/software/protocol\nversion survives while the UI says \"Saved as version N\". Send an explicit null\nfor cleared nullable fields (schemas allow null for result_summary etc.) and add\nunit/journey evidence that clearing then reloading shows the field empty.\nPreserve unknown metadata keys as previously requested.\n\nRe-run gofmt/fmt-check, build, web typecheck/lint/unit, make web-v2, sast-node;\nrecord exact outputs. Stay in scope.\n"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-29T01:49:53Z",
+          "run_id": "run-4630129054b7b3f7",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-29T02:15:31Z",
+          "run_id": "run-c83be6c86b35aed8",
+          "reason": "collect: all checks passed"
         }
-      ]
+      ],
+      "notes": "迁移到 NUC（2026-10-29）：Review approve，G2 被中止；WIP 在 origin/wip/20261029-T1307-web06a。恢复后重跑 G2。"
     },
     "T1308": {
       "status": "todo"
@@ -13353,7 +13375,7 @@
       "status": "todo"
     },
     "T1312": {
-      "status": "rejected",
+      "status": "blocked",
       "started_at": "2026-10-28T07:46:54Z",
       "worker_run_id": "run-a92b13c6efd61ebb",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
@@ -13378,7 +13400,8 @@
           "run_id": "run-45e77905fcc9069f",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
         }
-      ]
+      ],
+      "notes": "迁移到 NUC（2026-10-29）：等待 T1338 成员邀请 UI；无代码 diff。"
     },
     "T1313": {
       "status": "todo"
@@ -13660,9 +13683,9 @@
       "status": "todo"
     },
     "T1338": {
-      "status": "rejected",
-      "started_at": "2026-10-28T09:45:50Z",
-      "worker_run_id": "run-8f94e5fa7b75d08d",
+      "status": "blocked",
+      "started_at": "2026-10-29T03:01:59Z",
+      "worker_run_id": "run-24a1efc014a8edc2",
       "rejection_reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification",
       "history": [
         {
@@ -13684,11 +13707,58 @@
           "at": "2026-10-29T01:38:41Z",
           "run_id": "run-1127cf19cb888c5c",
           "reason": "collect rejected: result-status: RESULT.json reports status \"blocked\" — an honest non-completion is a rejected run, never verification"
+        },
+        {
+          "from": "rejected",
+          "to": "running",
+          "at": "2026-10-29T03:01:59Z",
+          "run_id": "run-24a1efc014a8edc2",
+          "reason": "worker spawn"
         }
-      ]
+      ],
+      "notes": "迁移到 NUC（2026-10-29）：成员 UI 已 rebaseline 到 e442ae2，Worker 被 stop；WIP 在 origin/wip/20261029-T1338-member-ui。恢复后先跑 make web-v2。"
     },
     "T1339": {
-      "status": "todo"
+      "status": "merged",
+      "started_at": "2026-10-29T01:39:57Z",
+      "worker_run_id": "run-4c14497ce23f0354",
+      "accepted_by_supervisor_at": "2026-10-29T02:47:38Z",
+      "merged_at": "2026-10-29T03:00:49Z",
+      "history": [
+        {
+          "from": "todo",
+          "to": "ready",
+          "at": "2026-10-29T01:39:19Z",
+          "run_id": "run-13b2ce013606d343"
+        },
+        {
+          "from": "ready",
+          "to": "running",
+          "at": "2026-10-29T01:39:57Z",
+          "run_id": "run-4c14497ce23f0354",
+          "reason": "worker spawn"
+        },
+        {
+          "from": "running",
+          "to": "verification",
+          "at": "2026-10-29T01:49:29Z",
+          "run_id": "run-416809ca613c77e3",
+          "reason": "collect: all checks passed"
+        },
+        {
+          "from": "verification",
+          "to": "accepted",
+          "at": "2026-10-29T02:47:38Z",
+          "run_id": "run-a9b8c3230ac0ab06"
+        },
+        {
+          "from": "accepted",
+          "to": "merged",
+          "at": "2026-10-29T03:00:49Z",
+          "run_id": "run-1b29a17487c50649",
+          "reason": "pr merge via rddev (four gates green)"
+        }
+      ]
     }
   },
   "version": 2
